@@ -58,6 +58,7 @@ static __always_inline void __preempt_count_sub(int val)
 	*preempt_count_ptr() -= val;
 }
 
+/* 선점카운트를 1감소시켰을때 선점이 가능하고 필요하다면 true리턴..*/
 static __always_inline bool __preempt_count_dec_and_test(void)
 {
 	/*

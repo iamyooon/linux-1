@@ -2216,8 +2216,7 @@ void free_hot_cold_page(struct page *page, bool cold)
 	else
 		list_add_tail(&page->lru, &pcp->lists[migratetype]);
 	pcp->count++;
-	if (pcp->count >= pcp->high) {
-		unsigned long batch = READ_ONCE(pcp->batch);
+	if (pcp->count >= pcp->high) { unsigned long batch = READ_ONCE(pcp->batch);
 		free_pcppages_bulk(zone, batch, pcp);
 		pcp->count -= batch;
 	}

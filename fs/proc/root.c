@@ -165,29 +165,37 @@ void __init proc_root_init(void)
 {
 	int err;
 
+	/* proc_inode구조체의 slab cache를 생성함.  */
 	proc_init_inodecache();
+	/* proc filesystem을 등록한다. */
 	err = register_filesystem(&proc_fs_type);
 	if (err)
 		return;
-
+	/* /proc/self entry를 생성,초기화함 */
 	proc_self_init();
 	proc_thread_self_init();
+	/* /proc/self/mounts를 생성함??  */
 	proc_symlink("mounts", NULL, "self/mounts");
-
+	/* /proc/self/net을 생성, network namespace subsystem등록 */
 	proc_net_init();
 
+/* sysvipc, fs, driver 디렉토리를 /proc에 생성함. */
 #ifdef CONFIG_SYSVIPC
 	proc_mkdir("sysvipc", NULL);
 #endif
 	proc_mkdir("fs", NULL);
 	proc_mkdir("driver", NULL);
+/* /proc/fs/nfsd, /proc/openprom dir을 생성함. 근데 머가 다르지..  */
 	proc_create_mount_point("fs/nfsd"); /* somewhere for the nfsd filesystem to be mounted */
 #if defined(CONFIG_SUN_OPENPROMFS) || defined(CONFIG_SUN_OPENPROMFS_MODULE)
 	/* just give it a mountpoint */
 	proc_create_mount_point("openprom");
 #endif
+	/* /proc/tty/{ldisc,driver,ldiscs,drivers} 생성함.. */
 	proc_tty_init();
+	/* /proc/bus 생성함.. */
 	proc_mkdir("bus", NULL);
+	/* /proc/sys 생성함.., sysctl 초기화..  */
 	proc_sys_init();
 }
 

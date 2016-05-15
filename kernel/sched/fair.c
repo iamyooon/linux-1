@@ -141,6 +141,7 @@ static inline void update_load_set(struct load_weight *lw, unsigned long w)
  *
  * This idea comes from the SD scheduler of Con Kolivas:
  */
+ /*cpu가 많아질수록 factor는 커짐..*/
 static unsigned int get_update_sysctl_factor(void)
 {
 	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
@@ -263,21 +264,25 @@ static inline struct task_struct *task_of(struct sched_entity *se)
 }
 
 /* Walk up scheduling entities hierarchy */
+/* 스케쥴링엔티티의 계층도를 따라올라감.. */
 #define for_each_sched_entity(se) \
 		for (; se; se = se->parent)
 
+/* 태스크 @p의 se가 가리키는 cfs_rq를 리턴함..*/
 static inline struct cfs_rq *task_cfs_rq(struct task_struct *p)
 {
 	return p->se.cfs_rq;
 }
 
 /* runqueue on which this entity is (to be) queued */
+/* se가 enqueue될 cfs_rq  */
 static inline struct cfs_rq *cfs_rq_of(struct sched_entity *se)
 {
 	return se->cfs_rq;
 }
 
 /* runqueue "owned" by this group */
+/* 태스크그룹이 소유한 cfs_rq를 리턴함..*/
 static inline struct cfs_rq *group_cfs_rq(struct sched_entity *grp)
 {
 	return grp->my_q;
@@ -381,6 +386,9 @@ static inline struct rq *rq_of(struct cfs_rq *cfs_rq)
 #define for_each_sched_entity(se) \
 		for (; se; se = NULL)
 
+/*fair group scheduling이 꺼져있는 경움..
+ * task @p가 enqueue되어 있는 cpu rq의 cfs rq를 리턴함..
+*/
 static inline struct cfs_rq *task_cfs_rq(struct task_struct *p)
 {
 	return &task_rq(p)->cfs;
@@ -448,6 +456,7 @@ static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 	return min_vruntime;
 }
 
+/* sched_entity @a의 vruntime이 @b보다 작다면 참을 리턴..  */
 static inline int entity_before(struct sched_entity *a,
 				struct sched_entity *b)
 {
@@ -485,6 +494,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
  */
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	/* cfs_rq의 root node */
 	struct rb_node **link = &cfs_rq->tasks_timeline.rb_node;
 	struct rb_node *parent = NULL;
 	struct sched_entity *entry;
@@ -492,6 +502,7 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	/*
 	 * Find the right place in the rbtree:
+	 * rb tree내의 적절한 위치를 찾음..
 	 */
 	while (*link) {
 		parent = *link;
@@ -511,11 +522,14 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	/*
 	 * Maintain a cache of leftmost tree entries (it is frequently
 	 * used):
+	 찾은 위치가 leftmost라면 cache에 설정해놓음..
 	 */
 	if (leftmost)
 		cfs_rq->rb_leftmost = &se->run_node;
 
+	/* 아마도 node를 연결.. */
 	rb_link_node(&se->run_node, parent, link);
+	/* 아마도 색깔을 설정..  */
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
 }
 
@@ -2417,8 +2431,11 @@ static inline void account_numa_dequeue(struct rq *rq, struct task_struct *p)
 static void
 account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	/* enqueue된 entity의 load.weight를 cfs에 추가해줌..*/
 	update_load_add(&cfs_rq->load, se->load.weight);
+	/* 부모없는 놈의 새끼라면!! */
 	if (!parent_entity(se))
+	/* enqueue된 entity의 load.weight를 rq에 추가해줌..*/
 		update_load_add(&rq_of(cfs_rq)->load, se->load.weight);
 #ifdef CONFIG_SMP
 	if (entity_is_task(se)) {
@@ -3006,12 +3023,14 @@ void remove_entity_load_avg(struct sched_entity *se)
 	 * Newly created task or never used group entity should not be removed
 	 * from its (source) cfs_rq
 	 */
+	/* 아직 한번도 업데이트가 안된 태스크?? 런큐에 한번도 안들어간 태스크??  */
 	if (se->avg.last_update_time == 0)
 		return;
 
 	last_update_time = cfs_rq_last_update_time(cfs_rq);
 
 	__update_load_avg(last_update_time, cpu_of(rq_of(cfs_rq)), &se->avg, 0, 0, NULL);
+	/* task의 load,util을 cfs_rq의 removed_load,util에 더한다. */
 	atomic_long_add(se->avg.load_avg, &cfs_rq->removed_load_avg);
 	atomic_long_add(se->avg.util_avg, &cfs_rq->removed_util_avg);
 }
@@ -3185,6 +3204,10 @@ static inline void check_schedstat_required(void)
 #endif
 }
 
+/* 
+1. ...
+2. cfs_rq의 레드블랙트리에 se를 넣는다..
+3. ...*/
 static void
 enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
@@ -3214,10 +3237,15 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		update_stats_enqueue(cfs_rq, se);
 		check_spread(cfs_rq, se);
 	}
+	/* 여기서 왜 curr와 같은지 볼까? 
+	이미 enqueue되었는 모든 se와 비교해보는것도 아니고..*/
 	if (se != cfs_rq->curr)
+		/*어쨌건 curr가 아니라면 cfs_rq의 레드블랙트리에 집어넣음..*/
 		__enqueue_entity(cfs_rq, se);
+	/* 이 태스크는 cfs_rq에 enqueue되었음을 설정함..  */
 	se->on_rq = 1;
 
+	/* cfs_rq에 se 들어간게 첨이라면..해당 cfs를 런큐의 leaf cfs rq에 넣음..  */
 	if (cfs_rq->nr_running == 1) {
 		list_add_leaf_cfs_rq(cfs_rq);
 		check_enqueue_throttle(cfs_rq);
@@ -3561,6 +3589,9 @@ void __refill_cfs_bandwidth_runtime(struct cfs_bandwidth *cfs_b)
 {
 	u64 now;
 
+	/* quota가 별도로 지정되어 있지 않으면..
+	period만큼 cpu를 쓸 수 있음. 이경우 runtime을 별도로
+	신경쓰는게 의미없음..*/
 	if (cfs_b->quota == RUNTIME_INF)
 		return;
 
@@ -4146,8 +4177,10 @@ void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 	raw_spin_lock_init(&cfs_b->lock);
 	cfs_b->runtime = 0;
 	cfs_b->quota = RUNTIME_INF;
+	/* period = 0.1s */
 	cfs_b->period = ns_to_ktime(default_cfs_period());
-
+	/* throttling cfs_rq를 연결해놓은 list
+	 * 이 cfs_rq는 어디서 가져온걸까.. */
 	INIT_LIST_HEAD(&cfs_b->throttled_cfs_rq);
 	hrtimer_init(&cfs_b->period_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED);
 	cfs_b->period_timer.function = sched_cfs_period_timer;
@@ -4325,10 +4358,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 
+	/* 태스크의 se가 연결되어 있는 계층구조를
+	탐색하면서 부모, 조부모..의 se를 하나씩 선택한다.
+	se가 바뀔때마다 se를 관련된 cfs_rq에 enqueue한다..
+	이미 cfs_rq에 enqueue되어있는 se가 있다면 탐색을 멈춘다..*/
 	for_each_sched_entity(se) {
+		/* 선택된 se가 이미 런큐에 들어가있다면 그만..  */
 		if (se->on_rq)
 			break;
+		/* se가 enqueue될 cfs_rq */
 		cfs_rq = cfs_rq_of(se);
+		/*cfs_rq에 se를 enqueue함..*/
 		enqueue_entity(cfs_rq, se, flags);
 
 		/*
@@ -4344,6 +4384,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		flags = ENQUEUE_WAKEUP;
 	}
 
+	/* 이미 enqueue되어 있는 se부터 다시 탐색을 시작..  */
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running++;
@@ -5448,9 +5489,12 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev)
 
 again:
 #ifdef CONFIG_FAIR_GROUP_SCHED
+	/* cfs_rq에 태스크가 하나도 없다면 */
 	if (!cfs_rq->nr_running)
 		goto idle;
 
+	/*지금 실행하고 있는 태스크가 fair가 아니라면..
+	먼가 간단해지나보다??*/
 	if (prev->sched_class != &fair_sched_class)
 		goto simple;
 
@@ -6336,6 +6380,7 @@ static unsigned long scale_rt_capacity(int cpu)
 	if (unlikely(delta < 0))
 		delta = 0;
 
+	/* 0.5s + delta */
 	total = sched_avg_period() + delta;
 
 	used = div_u64(avg, total);
@@ -6346,13 +6391,24 @@ static unsigned long scale_rt_capacity(int cpu)
 	return 1;
 }
 
+/*rq,sgc의 capacity 관련 변수를 갱신함.
+  capacity에 영향을 주는 요인은 아래와 같음
+  - arch capacity
+  - rt capacity
+*/
 static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 {
+	/* cpu의 capacity를 리턴..
+	보통 1024, smt인 경우 1178/sd->span_weight */
 	unsigned long capacity = arch_scale_cpu_capacity(sd, cpu);
 	struct sched_group *sdg = sd->groups;
 
+	/*cpu의 capacity로 설정함..*/ 
 	cpu_rq(cpu)->cpu_capacity_orig = capacity;
 
+	/* rt task가 실행중이라면 cpu의 capa가 상당부분 사용되고 있으므로
+	   cfs task가 쓸 capa는 줄어들것임. 이부분을 반영함. 
+	   capa 1 ~ 1024 */
 	capacity *= scale_rt_capacity(cpu);
 	capacity >>= SCHED_CAPACITY_SHIFT;
 
@@ -6363,6 +6419,10 @@ static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 	sdg->sgc->capacity = capacity;
 }
 
+/* sd에 속한 sg의 capacity 관련 변수 갱신함.
+   첫번째 sg만 갱신함..
+   1) sg->sgc->next_update 갱신
+   2) sg->sgc->capacity 갱신 */
 void update_group_capacity(struct sched_domain *sd, int cpu)
 {
 	struct sched_domain *child = sd->child;
@@ -6370,17 +6430,23 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 	unsigned long capacity;
 	unsigned long interval;
 
+	/* cpu capacity를 갱신할 주기를 계산하고 설정함..   */
 	interval = msecs_to_jiffies(sd->balance_interval);
+	/* max_load_balance_interval은 cpu online정보가 변경될때마다 갱신됨.  */
 	interval = clamp(interval, 1UL, max_load_balance_interval);
+	/* 다음 로드밸런싱시기 설정 */
 	sdg->sgc->next_update = jiffies + interval;
 
+	/* sd가 mc domain이라면 */
 	if (!child) {
+		/*rq,sgc의 capacity, capacity_orig를 갱신함 */
 		update_cpu_capacity(sd, cpu);
 		return;
 	}
 
 	capacity = 0;
 
+	/* 최하위 sd가 아니고 && SD_OVERLAP*/
 	if (child->flags & SD_OVERLAP) {
 		/*
 		 * SD_OVERLAP domains cannot assume that child groups
@@ -6410,12 +6476,16 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 			sgc = rq->sd->groups->sgc;
 			capacity += sgc->capacity;
 		}
+	/* 최하위 sd가 아니고 && !SD_OVERLAP */
 	} else  {
 		/*
 		 * !SD_OVERLAP domains can assume that child groups
 		 * span the current group.
+		 !SD_OVERLAP인 도메인은 child groups은 현재 그룹을 span한것이라
+		 가정해도 된다..
 		 */ 
 
+		/* child sd에 속한 모든 sg->sgc의 capacity를 전부다 더함.  */
 		group = child->groups;
 		do {
 			capacity += group->sgc->capacity;
@@ -6423,6 +6493,7 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 		} while (group != child->groups);
 	}
 
+	/* CPU domain은 child sd에 속한 모든 sg->sgc의 capacity를 전부다 더함. */
 	sdg->sgc->capacity = capacity;
 }
 
@@ -6563,6 +6634,7 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 		sgs->group_util += cpu_util(i);
 		sgs->sum_nr_running += rq->cfs.h_nr_running;
 
+		/* cpu의 running task가 2개 이상이라면 */
 		nr_running = rq->nr_running;
 		if (nr_running > 1)
 			*overload = true;
@@ -6703,6 +6775,8 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
 				update_group_capacity(env->sd, env->dst_cpu);
 		}
 
+		/* scheduling group sg에 속한 cpu중 하나라도
+		 * nr_running이 2이상이라면 overload를 참으로 설정함. */
 		update_sg_lb_stats(env, sg, load_idx, local_group, sgs,
 						&overload);
 
@@ -6742,6 +6816,11 @@ next_group:
 	if (env->sd->flags & SD_NUMA)
 		env->fbq_type = fbq_classify_group(&sds->busiest_stat);
 
+	/* 아래조건을 만족할 경우 dst rq가 속한 rd의 overload갱신.
+	 * 1) sd->parent가 없을 경우.. 최상위 sched domain이란 얘기?
+	 * 2) load를 전달받을 rq와 연결된 rd의 overload여부가 sg의 다를경우..
+	 * 좀 이상하다.. 전달받을놈의 rd의 overload가 저렇게 변경되도 되는건가..
+	 */
 	if (!env->sd->parent) {
 		/* update overload indicator if we are at root domain */
 		if (env->dst_rq->rd->overload != overload)
@@ -7502,6 +7581,8 @@ static int idle_balance(struct rq *this_rq)
 	 */
 	this_rq->idle_stamp = rq_clock(this_rq);
 
+	/* this cpu와 연결된 root domain이 overload하지 않다고 나온다면
+	 * idle balance를 하지 않고 종료한다. */
 	if (this_rq->avg_idle < sysctl_sched_migration_cost ||
 	    !this_rq->rd->overload) {
 		rcu_read_lock();
@@ -8135,6 +8216,7 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
  *  - child not yet on the tasklist
  *  - preemption disabled
  */
+/* 새로 생성된 태스크 @p를 설정함..  */
 static void task_fork_fair(struct task_struct *p)
 {
 	struct cfs_rq *cfs_rq;
@@ -8147,6 +8229,9 @@ static void task_fork_fair(struct task_struct *p)
 
 	update_rq_clock(rq);
 
+	/* current의 se가 가리키고 있는 cfs_rq
+	 fair group scheduling이 활성화되어 있을 경우 NULL로 초기화됨..
+	 current의 cfs_rq가 NULL일 확률은 없나?? */
 	cfs_rq = task_cfs_rq(current);
 	curr = cfs_rq->curr;
 
@@ -8157,6 +8242,8 @@ static void task_fork_fair(struct task_struct *p)
 	 * of child point to valid ones.
 	 */
 	rcu_read_lock();
+	/* 태스트 @p가 enqueue될 cfs_rq, 부모 se로 
+		태스크그룹의 cfs_rq, se를 지정  */
 	__set_task_cpu(p, this_cpu);
 	rcu_read_unlock();
 
@@ -8166,6 +8253,10 @@ static void task_fork_fair(struct task_struct *p)
 		se->vruntime = curr->vruntime;
 	place_entity(cfs_rq, se, 1);
 
+	/* child가 먼저 실행되도록 하는 설정이 켜져 있고
+	current의 vruntime이 @p보다 작다면(더 빨리 실행될 놈이라면) 
+	vruntime을 교환하고(@p가 먼저 실행될 수 있도록 하고..)  
+	현재 rq를 리스케쥴링한다..*/
 	if (sysctl_sched_child_runs_first && curr && entity_before(curr, se)) {
 		/*
 		 * Upon rescheduling, sched_class::put_prev_task() will place
@@ -8323,8 +8414,7 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 #ifdef CONFIG_FAIR_GROUP_SCHED
 static void task_move_group_fair(struct task_struct *p)
 {
-	detach_task_cfs_rq(p);
-	set_task_rq(p, task_cpu(p));
+	detach_task_cfs_rq(p); set_task_rq(p, task_cpu(p));
 
 #ifdef CONFIG_SMP
 	/* Tell se's cfs_rq has been changed -- migrated */
@@ -8356,9 +8446,13 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 	struct sched_entity *se;
 	int i;
 
+	/* 포인터를 nr_cpu_ids만큼 할당받음. 태스크그룹의 cfs_rq는 포인터니까
+	그룹 자신이 직접 가지는게 아닌 기존의 cfs_rq를 가리키겠지..
+	아님..밑에서 possible cpu만큼 실제 할당받음..*/
 	tg->cfs_rq = kzalloc(sizeof(cfs_rq) * nr_cpu_ids, GFP_KERNEL);
 	if (!tg->cfs_rq)
 		goto err;
+	/* 얘도 그러겠지..  */
 	tg->se = kzalloc(sizeof(se) * nr_cpu_ids, GFP_KERNEL);
 	if (!tg->se)
 		goto err;
@@ -8367,18 +8461,30 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 
 	init_cfs_bandwidth(tg_cfs_bandwidth(tg));
 
+	/* iterate all possible cpu */
 	for_each_possible_cpu(i) {
+		/*task group이 사용할 cfs_rq를 할당받음. */
 		cfs_rq = kzalloc_node(sizeof(struct cfs_rq),
 				      GFP_KERNEL, cpu_to_node(i));
 		if (!cfs_rq)
 			goto err;
 
+		/*task group이 사용할 se를 할당받음. */
 		se = kzalloc_node(sizeof(struct sched_entity),
 				  GFP_KERNEL, cpu_to_node(i));
 		if (!se)
 			goto err_free_rq;
 
 		init_cfs_rq(cfs_rq);
+		/*cfs_rq->tg = tg 
+		  할당되는 태스크그룹의 cfs rq는 특정 cpu rq에 연결되어 있음..해당 cpu rq만을
+		  위해 일하는 놈인가봄..
+		  cfs_rq->rq = rf of cpu(i)
+		  tg->cfs[i] = cfs_rq
+		  tg->se[i] = se 
+		  se->cfs_rq = parent->my_q
+		  se->my_q = cfs_rq
+		  se->parent = parent->se[i] */
 		init_tg_cfs_entry(tg, cfs_rq, se, i, parent->se[i]);
 		init_entity_runnable_average(se);
 	}
@@ -8397,7 +8503,9 @@ void unregister_fair_sched_group(struct task_group *tg)
 	struct rq *rq;
 	int cpu;
 
+	/* 시스템의 모든 possible cpu를 순회함 */
 	for_each_possible_cpu(cpu) {
+		/* 특정 cpu에서 쓰이는 task그룹의 sched_entity가 있다면?? */
 		if (tg->se[cpu])
 			remove_entity_load_avg(tg->se[cpu]);
 
@@ -8422,25 +8530,32 @@ void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 {
 	struct rq *rq = cpu_rq(cpu);
 
+	/* cfs_rq와 태스크그룹을 연결함 */
 	cfs_rq->tg = tg;
+	/* cfs_rq와 런큐를 연결함 */
 	cfs_rq->rq = rq;
 	init_cfs_rq_runtime(cfs_rq);
 
+	/* 태스크그룹이 새로 할당받은 cfs_rq를 가리키도록 함. */
 	tg->cfs_rq[cpu] = cfs_rq;
+	/* 태스크그룹의 se가 새로할당받은 se를 가리키도록 함..*/
 	tg->se[cpu] = se;
 
 	/* se could be NULL for root_task_group */
 	if (!se)
 		return;
 
+	/* 최상위 tg라면 tg->se와 rq->cfs를 연결함. depth는 당근 0 */
 	if (!parent) {
 		se->cfs_rq = &rq->cfs;
 		se->depth = 0;
+	/* 최상위가 아니라면, parent의 my_q로 tg->se->cfs_rq를 설정함.. */
 	} else {
 		se->cfs_rq = parent->my_q;
 		se->depth = parent->depth + 1;
 	}
 
+	/*se->my_q에 cfs_rq를 연결함.. */
 	se->my_q = cfs_rq;
 	/* guarantee group entities always have weight */
 	update_load_set(&se->load, NICE_0_LOAD);
@@ -8471,13 +8586,17 @@ int sched_group_set_shares(struct task_group *tg, unsigned long shares)
 		struct rq *rq = cpu_rq(i);
 		struct sched_entity *se;
 
+		/*태스크그룹이 가지고 있는 possible cpu별 se를 구함..*/
 		se = tg->se[i];
 		/* Propagate contribution to hierarchy */
 		raw_spin_lock_irqsave(&rq->lock, flags);
 
 		/* Possible calls to update_curr() need rq clock */
 		update_rq_clock(rq);
+		/* sched_entity의 hierarchy를 올라가면서 se를 
+		하나씩 선택함..*/
 		for_each_sched_entity(se)
+			/* se와 연관된 태스크그룹이 소유한 cfs_rq리턴..  */
 			update_cfs_shares(group_cfs_rq(se));
 		raw_spin_unlock_irqrestore(&rq->lock, flags);
 	}
@@ -8594,6 +8713,7 @@ void show_numa_stats(struct task_struct *p, struct seq_file *m)
 __init void init_sched_fair_class(void)
 {
 #ifdef CONFIG_SMP
+	/* load balance가 필요할 때 처리하기 위해 등록함.. */
 	open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
 
 #ifdef CONFIG_NO_HZ_COMMON

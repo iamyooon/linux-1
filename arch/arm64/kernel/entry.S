@@ -411,8 +411,11 @@ el1_irq:
 
 #ifdef CONFIG_PREEMPT
 	ldr	w24, [tsk, #TI_PREEMPT]		// get preempt count
+	// current가 선점가능하지 않다면 label 1로 점프...
 	cbnz	w24, 1f				// preempt count != 0
+	// current가 선점가능하다면..
 	ldr	x0, [tsk, #TI_FLAGS]		// get flags
+	// resched가 필요한지 체크... 필요없다면 label1로 점프..
 	tbz	x0, #TIF_NEED_RESCHED, 1f	// needs rescheduling?
 	bl	el1_preempt
 1:

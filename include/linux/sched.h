@@ -2828,9 +2828,11 @@ static inline void threadgroup_change_end(struct task_struct *tsk)
 
 #ifndef __HAVE_THREAD_FUNCTIONS
 
-#define task_thread_info(task)	((struct thread_info *)(task)->stack)
+#define task_thread_info(task)	((struct thread_info *)(task)->stack) 
 #define task_stack_page(task)	((task)->stack)
 
+/* new task @p의 stack에 parent task @org의 stack이 가리키던 커널스택을
+가리키게 한다. 이 커널스택의 task변수가  new task를 가리키게하나?? */
 static inline void setup_thread_stack(struct task_struct *p, struct task_struct *org)
 {
 	*task_thread_info(p) = *task_thread_info(org);

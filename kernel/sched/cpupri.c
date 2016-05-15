@@ -103,6 +103,7 @@ int cpupri_find(struct cpupri *cp, struct task_struct *p,
 		if (skip)
 			continue;
 
+		/*   */
 		if (cpumask_any_and(&p->cpus_allowed, vec->mask) >= nr_cpu_ids)
 			continue;
 
@@ -211,6 +212,9 @@ int cpupri_init(struct cpupri *cp)
 
 	memset(cp, 0, sizeof(*cp));
 
+	/* range : 0 ~ MAX_RT_PRIO+2 
+	  1. cpupri->pri_to_cpu[] 초기화
+	 */
 	for (i = 0; i < CPUPRI_NR_PRIORITIES; i++) {
 		struct cpupri_vec *vec = &cp->pri_to_cpu[i];
 
@@ -219,10 +223,12 @@ int cpupri_init(struct cpupri *cp)
 			goto cleanup;
 	}
 
+	/* possible cpu개수만큼의 int변수를 가지고 있음.. */
 	cp->cpu_to_pri = kcalloc(nr_cpu_ids, sizeof(int), GFP_KERNEL);
 	if (!cp->cpu_to_pri)
 		goto cleanup;
 
+	/* 초기화..*/
 	for_each_possible_cpu(i)
 		cp->cpu_to_pri[i] = CPUPRI_INVALID;
 

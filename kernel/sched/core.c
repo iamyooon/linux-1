@@ -847,6 +847,7 @@ static inline int normal_prio(struct task_struct *p)
 	else if (task_has_rt_policy(p))
 		prio = MAX_RT_PRIO-1 - p->rt_priority;
 	else
+		/* task @p의 static_prio를 리턴함. */
 		prio = __normal_prio(p);
 	return prio;
 }
@@ -860,14 +861,17 @@ static inline int normal_prio(struct task_struct *p)
  */
 static int effective_prio(struct task_struct *p)
 {
+	/* CFS 태스크의 경우, task @p의 static_prio를 리턴함. */
 	p->normal_prio = normal_prio(p);
 	/*
 	 * If we are RT tasks or we were boosted to RT priority,
 	 * keep the priority unchanged. Otherwise, update priority
 	 * to the normal priority:
 	 */
+	/* normal task급의 priority를 가지고 있다면..  */
 	if (!rt_prio(p->prio))
 		return p->normal_prio;
+	/* rt task급의 priority를 가지고 있다면 */
 	return p->prio;
 }
 
@@ -1144,6 +1148,8 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 }
 EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
 
+/* 태스트 @p가 enqueue될 cfs_rq,
+   부모 se로 태스크그룹의 cfs_rq, se를 지정  */
 void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 {
 #ifdef CONFIG_SCHED_DEBUG
@@ -1188,6 +1194,8 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 		perf_event_task_migrate(p);
 	}
 
+	/* 태스트 @p가 enqueue될 cfs_rq, 
+	   부모 se로 태스크그룹의 cfs_rq, se를 지정  */
 	__set_task_cpu(p, new_cpu);
 }
 
@@ -2238,12 +2246,15 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	unsigned long flags;
 	int cpu = get_cpu();
 
+	/* task @p의 se,rt_se, dl_se를 초기화...
+	 * 특정 스케쥴링클래스를 사용하는 엔티티로서 동작할 수 있게
+	 * 모든 se를 초기화함..
+	 */
 	__sched_fork(clone_flags, p);
 	/*
 	 * We mark the process as running here. This guarantees that
 	 * nobody will actually run it, and a signal or other external
-	 * event cannot wake it up and insert it on the runqueue either.
-	 */
+	 * event cannot wake it up and insert it on the runqueue either.  */
 	p->state = TASK_RUNNING;
 
 	/*
@@ -2281,6 +2292,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_class = &fair_sched_class;
 	}
 
+	/* 새로 생성한 child process @p를 초기화... */
 	if (p->sched_class->task_fork)
 		p->sched_class->task_fork(p);
 
@@ -2432,6 +2444,8 @@ void wake_up_new_task(struct task_struct *p)
 	 *  - cpus_allowed can change in the fork path
 	 *  - any previously selected cpu might disappear through hotplug
 	 */
+	/* 태스트 @p가 enqueue될 cfs_rq, 
+	   부모 se로 태스크그룹의 cfs_rq, se를 지정  */
 	set_task_cpu(p, select_task_rq(p, task_cpu(p), SD_BALANCE_FORK, 0));
 #endif
 
@@ -3246,8 +3260,10 @@ asmlinkage __visible void __sched schedule(void)
 
 	sched_submit_work(tsk);
 	do {
+		/* 선점 비활성화...*/
 		preempt_disable();
 		__schedule(false);
+		/* 선점 활성화.. */
 		sched_preempt_enable_no_resched();
 	} while (need_resched());
 }
@@ -3279,8 +3295,10 @@ asmlinkage __visible void __sched schedule_user(void)
  */
 void __sched schedule_preempt_disabled(void)
 {
+	/* preempt count를 1 감소시켜 커널선점을 활성화함...*/
 	sched_preempt_enable_no_resched();
 	schedule();
+	/* preempt count를 1 증가시켜 커널선점을 비활성화함.. */
 	preempt_disable();
 }
 
@@ -5032,6 +5050,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	raw_spin_lock_irqsave(&idle->pi_lock, flags);
 	raw_spin_lock(&rq->lock);
 
+	/*idle task의 스케쥴러관련된 변수를 초기화한다...*/
 	__sched_fork(0, idle);
 	idle->state = TASK_RUNNING;
 	idle->se.exec_start = sched_clock();
@@ -5045,6 +5064,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	 *
 	 * And since this is boot we can forgo the serialization.
 	 */
+	/* @cpu를 idle task가 동작할 cpu list에 설정함..  */
 	set_cpus_allowed_common(idle, cpumask_of(cpu));
 #endif
 	/*
@@ -5058,9 +5078,13 @@ void init_idle(struct task_struct *idle, int cpu)
 	 * Silence PROVE_RCU
 	 */
 	rcu_read_lock();
+	/* idle task가 enqueue될 cfs_rq, 부모 se로 
+	태스크그룹의 cfs_rq, se를 지정  */
 	__set_task_cpu(idle, cpu);
 	rcu_read_unlock();
 
+	/* idle thread를 런큐에 지정하고 
+	런큐의 현재 동작중인 프로세스로도 설정한다..*/
 	rq->curr = rq->idle = idle;
 	idle->on_rq = TASK_ON_RQ_QUEUED;
 #ifdef CONFIG_SMP
@@ -5070,6 +5094,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	raw_spin_unlock_irqrestore(&idle->pi_lock, flags);
 
 	/* Set the preempt count _outside_ the spinlocks! */
+	/*preemption enable*/ 
 	init_idle_preempt_count(idle, cpu);
 
 	/*
@@ -5079,6 +5104,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	ftrace_graph_init_idle_task(idle, cpu);
 	vtime_init_idle(idle, cpu);
 #ifdef CONFIG_SMP
+	/*task의 이름을 swapper/0이라고 설정함..*/
 	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu);
 #endif
 }
@@ -5352,9 +5378,14 @@ static void set_rq_online(struct rq *rq)
 	if (!rq->online) {
 		const struct sched_class *class;
 
+		/* rq와 연결된 root domain에 해당 cpu가 online임을 설정함. */
 		cpumask_set_cpu(rq->cpu, rq->rd->online);
+		/* rq가 online상태임을 rq에 설정함. */
 		rq->online = 1;
 
+		/* 모든 스케쥴링 클래스에 런큐가 oneline상태로 변했으니
+		 * 해줄거 있음 하라는 기회를 줌..
+		 */
 		for_each_class(class) {
 			if (class->rq_online)
 				class->rq_online(rq);
@@ -5362,17 +5393,28 @@ static void set_rq_online(struct rq *rq)
 	}
 }
 
+/* 런큐 @rq가 online상태라면 아래 작업을 수행함
+  - 모든 스케쥴링 클래스의 rq_offline()를 호출해서 먼가함..
+  - 연결된 root domain의 online cpumask에서 제거
+ */
 static void set_rq_offline(struct rq *rq)
 {
+	/* 런큐가 온라인상태라면 */
 	if (rq->online) {
 		const struct sched_class *class;
 
+		/* 모든 스케쥴링 클래스를 돌며
+		 * 런큐가 offline상태가 됐음을 알리며
+		 * 정리작업을 하게 한다.*/
 		for_each_class(class) {
 			if (class->rq_offline)
 				class->rq_offline(rq);
 		}
 
+		/* 더 이상 런큐는 온라인이 아니므로,
+		 * rq에 연결된 루트도메인의 online cpumask에서 제거한다. */
 		cpumask_clear_cpu(rq->cpu, rq->rd->online);
+		/* 런큐의 자료구조에도 온라인상태가 아님을 설정한다. */
 		rq->online = 0;
 	}
 }
@@ -5621,6 +5663,14 @@ static inline bool sched_debug(void)
 }
 #endif /* CONFIG_SCHED_DEBUG */
 
+/*@sd가 없어져도 될 sd인지 아닌지를 체크해줌..
+ 없어져도 되는 경우 
+ - sd에 속한 cpu가 1개일경우
+ - 아래 2경우에 해당되지 않는 경우
+ 있어야 하는 경우
+ - sg 2개이상일때만 쓰는 플래그를 쓸 경우
+ - SD_WAKE_AFFINE 플래그를 쓸 경우
+*/
 static int sd_degenerate(struct sched_domain *sd)
 {
 	if (cpumask_weight(sched_domain_span(sd)) == 1)
@@ -5645,18 +5695,33 @@ static int sd_degenerate(struct sched_domain *sd)
 	return 1;
 }
 
+/* @sd가 꼭 필요한 sd인지 아닌지를 체크해줌..  
+ 1) 없어져도 되는 경우
+  - parent sd에 속한 cpu가 1개인 경우
+  - parent sd에 속한 sg가 2개이상일 때만 쓸 수 있는 플래그(,,,)와 SD_WAKE_AFFINE을 쓰지 않는 경우
+  - 아래 경우에 해당되지 않는 경우
+ 2) 있어야 되는 경우
+  - parent sd와 child sd의 cpu구성이 동일하지 않은 경우
+  - ~cflags & pflags가 참인 경우
+  - sg 2개이상일때만 쓰는 플래그를 쓸 경우
+  - SD_WAKE_AFFINE 플래그를 쓸 경우
+*/
 static int
 sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 {
 	unsigned long cflags = sd->flags, pflags = parent->flags;
 
+	/* parent sd가 없어져도 되는 sd라면 */
 	if (sd_degenerate(parent))
 		return 1;
 
+	/* child sd인 @sd와 parent sd의 cpu구성이 동일하지 않다면*/
 	if (!cpumask_equal(sched_domain_span(sd), sched_domain_span(parent)))
 		return 0;
 
 	/* Flags needing groups don't count if only 1 group in parent */
+	/* parent sd에 속한 sg가 1개일 경우
+	   sg 2개이상에서만 필요한 flag를 제거함..*/
 	if (parent->groups == parent->groups->next) {
 		pflags &= ~(SD_LOAD_BALANCE |
 				SD_BALANCE_NEWIDLE |
@@ -5666,9 +5731,11 @@ sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 				SD_SHARE_PKG_RESOURCES |
 				SD_PREFER_SIBLING |
 				SD_SHARE_POWERDOMAIN);
+		/* system에 존재하는 노드가 1개라면 아래 플래그 제거..  */
 		if (nr_node_ids == 1)
 			pflags &= ~SD_SERIALIZE;
 	}
+	/*child sd의 flag인 cflags....*/
 	if (~cflags & pflags)
 		return 0;
 
@@ -5688,6 +5755,11 @@ static void free_rootdomain(struct rcu_head *rcu)
 	kfree(rd);
 }
 
+/* run queue와 root domain을 연결해준다. 
+  - rq가 이미 root domain과 연결되어 있다면 해제작업을 먼저 해줌
+  - rq와 rd를 연결해줌(rd->span에 cpu추가, rd->refcount증가)
+  - rq가 active cpu의 rq라면 online으로 변했으므로 먼가 작업을 수행함 
+*/
 static void rq_attach_root(struct rq *rq, struct root_domain *rd)
 {
 	struct root_domain *old_rd = NULL;
@@ -5695,12 +5767,18 @@ static void rq_attach_root(struct rq *rq, struct root_domain *rd)
 
 	raw_spin_lock_irqsave(&rq->lock, flags);
 
+	/* booting중에 null로 초기화됨.. */
 	if (rq->rd) {
 		old_rd = rq->rd;
 
+		/* 런큐가 온라인상태로 기록되어 있다면 */
 		if (cpumask_test_cpu(rq->cpu, old_rd->online))
+			/* 런큐가 더이상 온라인이 아님을 알리고 정리작업을 수행한다.
+			  - 모든 스케쥴링 클래스의 rq_offline()를 호출해서 먼가함..
+			  - 연결된 root domain의 online cpumask에서 제거 */
 			set_rq_offline(rq);
 
+		/* 기존에 연결되어있던 rd의 span에서 rq를 지움 */
 		cpumask_clear_cpu(rq->cpu, old_rd->span);
 
 		/*
@@ -5708,25 +5786,36 @@ static void rq_attach_root(struct rq *rq, struct root_domain *rd)
 		 * set old_rd to NULL to skip the freeing later
 		 * in this function:
 		 */
+		/* 나 혼자 쓰고 있어서 참조카운트를 감소시키면
+		 * root domain을 해제할 수 있지만 나중에 제거하기 위해
+		 * 해제시키지 않음.*/
 		if (!atomic_dec_and_test(&old_rd->refcount))
 			old_rd = NULL;
 	}
 
+	/* rood domain이 특정 런큐와 연결되어 쓰일것이므로 참조카운트 증가 */
 	atomic_inc(&rd->refcount);
+	/* 런큐에 새로운 rd와 연결함. */
 	rq->rd = rd;
 
+	/* rq->cpu를 새로운 rd의 span에 추가함 */
 	cpumask_set_cpu(rq->cpu, rd->span);
+	/* active cpu라면.. */
 	if (cpumask_test_cpu(rq->cpu, cpu_active_mask))
+		/* rq를 온라인상태로 바꾼다. */
 		set_rq_online(rq);
 
 	raw_spin_unlock_irqrestore(&rq->lock, flags);
 
+	/* 여기까지 왔으면 old_rd의 참조카운트는 1이상일 텐데..
+	상관없이 제거하겠다고?? */
 	if (old_rd)
 		call_rcu_sched(&old_rd->rcu, free_rootdomain);
 }
 
 static int init_rootdomain(struct root_domain *rd)
 {
+	/* clear rd as zero */
 	memset(rd, 0, sizeof(*rd));
 
 	if (!zalloc_cpumask_var(&rd->span, GFP_KERNEL))
@@ -5739,9 +5828,14 @@ static int init_rootdomain(struct root_domain *rd)
 		goto free_dlo_mask;
 
 	init_dl_bw(&rd->dl_bw);
+	/* alloc memory for rd->cpudl->elements */
 	if (cpudl_init(&rd->cpudl) != 0)
 		goto free_dlo_mask;
 
+	/* 
+	  - init cpupri->pri_to_cpu 
+	  - alloc memory for cpupri->cpu_to_pri
+	 */
 	if (cpupri_init(&rd->cpupri) != 0)
 		goto free_rto_mask;
 	return 0;
@@ -5768,6 +5862,7 @@ static void init_defrootdomain(void)
 {
 	init_rootdomain(&def_root_domain);
 
+	/* 아직 어떤 cpu에도 연결안되어 있는데 1로 설정하는 이유는 멀까?? */
 	atomic_set(&def_root_domain.refcount, 1);
 }
 
@@ -5775,10 +5870,12 @@ static struct root_domain *alloc_rootdomain(void)
 {
 	struct root_domain *rd;
 
+	/* root_domain 구조체를 할당받음 */
 	rd = kmalloc(sizeof(*rd), GFP_KERNEL);
 	if (!rd)
 		return NULL;
 
+	/* 할당받은 root_domain을 초기화함. */
 	if (init_rootdomain(rd) != 0) {
 		kfree(rd);
 		return NULL;
@@ -5857,21 +5954,37 @@ static void update_top_cache_domain(int cpu)
 	int id = cpu;
 	int size = 1;
 
+	/* SD_SHARE_PKG_RESOURCES 플래그를 사용하는
+	 * cpu가 속한 highest 도메인을 리턴함.
+	 * smt level이 있는 토폴로지에서만 쓰는 플래그임. */
 	sd = highest_flag_domain(cpu, SD_SHARE_PKG_RESOURCES);
 	if (sd) {
+		/* SD_SHARE_PKG_RESOURCES 플래그를 사용하는
+		   highest domain의 first cpu, cpu 갯수, parent
+		 */
 		id = cpumask_first(sched_domain_span(sd));
 		size = cpumask_weight(sched_domain_span(sd));
 		busy_sd = sd->parent; /* sd_busy */
 	}
+	/* 위 플래그를 사용하는 최상위도메인을 group으로 가지고
+	 * 있는 도메인을 설정.. */
 	rcu_assign_pointer(per_cpu(sd_busy, cpu), busy_sd);
 
+	/* 위 플래그를 사용하는 최상위도메인을 percpu변수에 설정.. */
 	rcu_assign_pointer(per_cpu(sd_llc, cpu), sd);
+	/* 위 플래그를 사용하는 최상위도메인에 속한 cpu개수  */
 	per_cpu(sd_llc_size, cpu) = size;
+	/* 위 플래그를 사용하는 최상위도메인에 속한 first cpu id */
 	per_cpu(sd_llc_id, cpu) = id;
 
+	/* SD_NUMA를 쓰고 있는 @cpu의 최하위도메인을 리턴함.
+	 * SD_NUMA를 쓰는 도메인이 없다면 NULL을 리턴함 */
 	sd = lowest_flag_domain(cpu, SD_NUMA);
+	/* NUMA안쓰면 null.. */
 	rcu_assign_pointer(per_cpu(sd_numa, cpu), sd);
 
+	/* SD_ASYM_PACKING 플래그를 사용하는
+	 * cpu에 속한 최상위도메인을 리턴함. */
 	sd = highest_flag_domain(cpu, SD_ASYM_PACKING);
 	rcu_assign_pointer(per_cpu(sd_asym, cpu), sd);
 }
@@ -5879,6 +5992,12 @@ static void update_top_cache_domain(int cpu)
 /*
  * Attach the domain 'sd' to 'cpu' as its base domain. Callers must
  * hold the hotplug lock.
+ */
+ /* 
+ 1) 불필요한 sd를 제거함
+ 2) @cpu의 런큐에 @rd root domain를 연결함
+  - 기존에 연결된 old rd는 해체작업수행
+ 3) rq->sd = sd
  */
 static void
 cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
@@ -5889,11 +6008,15 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	/* Remove the sched domains which do not contribute to scheduling. */
 	for (tmp = sd; tmp; ) {
 		struct sched_domain *parent = tmp->parent;
+		/*계층도의 끝까지 왔다면 멈춤..*/
 		if (!parent)
 			break;
 
+		/* tmp, parent둘중 하나가 없어도 되는 sd라면.. */
 		if (sd_parent_degenerate(tmp, parent)) {
+			/* 조부모를 부모로 설정함..  */
 			tmp->parent = parent->parent;
+			/* 조부모도 손자를 자식으로 설정함.. */
 			if (parent->parent)
 				parent->parent->child = tmp;
 			/*
@@ -5903,11 +6026,17 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 			 */
 			if (parent->flags & SD_PREFER_SIBLING)
 				tmp->flags |= SD_PREFER_SIBLING;
+			/* free_sched_domain()을 호출해서 parent sd를 free시킴..
+			필요할 경우 sg도 free시킴..*/
 			destroy_sched_domain(parent, cpu);
+		/* 아니라면 상위 sd로 이동..*/
 		} else
 			tmp = tmp->parent;
 	}
 
+	/* 왠지 모르겠지만 다시 검사..
+	sd가 불필요한 도메인이라면 제거하고 부모 sd를
+	sd로 설정..*/
 	if (sd && sd_degenerate(sd)) {
 		tmp = sd;
 		sd = sd->parent;
@@ -5918,7 +6047,23 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 
 	sched_domain_debug(sd, cpu);
 
+	/* 런큐를 루트도메인에 연결한다.
+	 * 런큐의 cpu는 루트도메인의 span cpumask에 추가됨.
+	 * 런큐의 cpu가 현재 동작중인 cpu라면 스케쥴링클래스마다
+	 * 새롭게 동작을 시작한 cpu를 위한 초기화를 수행한다.
+	 *
+	 * 런큐에 이미 연결된 루트도메인이 있다면 해당 루트도메인의
+	 * span cpumask에서 정보를 지우고 스케쥴링클래스마다
+	 * detach되는 cpu정보를 전달해서 정리작업을 수행한다.
+	 */
+	/* run queue와 root domain을 연결해준다. 
+	  - rq가 이미 root domain과 연결되어 있다면 해제작업을 먼저 해줌
+	  - rq와 rd를 연결해줌(rd->span에 cpu추가, rd->refcount증가)
+	  - rq가 active cpu의 rq라면 online으로 변했으므로 먼가 작업을 수행함 
+	*/
 	rq_attach_root(rq, rd);
+	/* 런큐의 scheduling domain정보를 새로운 sd로 교체한다.  
+	기존 sd는 free한다.*/
 	tmp = rq->sd;
 	rcu_assign_pointer(rq->sd, sd);
 	destroy_sched_domains(tmp, cpu);
@@ -5986,6 +6131,7 @@ static void build_group_mask(struct sched_domain *sd, struct sched_group *sg)
  * Return the canonical balance cpu for this group, this is the first cpu
  * of this group that's also in the iteration mask.
  */
+/* sg->cpumask & sg->sgc->cpumask의 첫번째 bit를 리턴함..*/
 int group_balance_cpu(struct sched_group *sg)
 {
 	return cpumask_first_and(sched_group_cpus(sg), sched_group_mask(sg));
@@ -6066,14 +6212,23 @@ fail:
 	return -ENOMEM;
 }
 
+/* @sg, @sg->sgc가 @cpu번째 sdd->sg, sdd->sgc를 가리키게 함
+   return value - @cpu or child sd->span's first cpu */
+/* @cpu번째 sdd->sg, sdd->sgc를 구해서 인자로 넘긴 @sg에 설정해서 리턴한다.
+그런데 sdd가 CPU domain에 대한 것이라면 @cpu는 child domain의 first cpu로 바뀜..
+*/
 static int get_group(int cpu, struct sd_data *sdd, struct sched_group **sg)
 {
+	/* @cpu번째 sdd->sd를 구함*/
 	struct sched_domain *sd = *per_cpu_ptr(sdd->sd, cpu);
 	struct sched_domain *child = sd->child;
 
+	/*최하위 sched_domain이 아니라면..*/
 	if (child)
+		/*child sched domain에 속한 첫번째 cpu*/
 		cpu = cpumask_first(sched_domain_span(child));
 
+	/* @cpu번째 sdd->sg, sdd->sgc를 가리키게 함 */
 	if (sg) {
 		*sg = *per_cpu_ptr(sdd->sg, cpu);
 		(*sg)->sgc = *per_cpu_ptr(sdd->sgc, cpu);
@@ -6087,9 +6242,15 @@ static int get_group(int cpu, struct sd_data *sdd, struct sched_group **sg)
  * build_sched_groups will build a circular linked list of the groups
  * covered by the given span, and will set each group's ->cpumask correctly,
  * and ->cpu_capacity to 0.
+ 주어진 span을 이용해서 circular linked list를 만듬.
+ group의 cpumask도 적절하게 설정
+ group의 cpu_capacity를 0으로 설정
  *
  * Assumes the sched_domain tree is fully constructed
  */
+/* sd->groups, @sd->groups->sgc가 @cpu번째 sdd->sg, sdd->sgc를 가리키게 함 */
+/* @sd는 @cpu가 속해있는 도메인임. 이 도메인에 속한 모든 cpu를 순회하며 sg list를 만듬.
+   @sd의 groups가 이 sg list를 가리키게 함.  */
 static int
 build_sched_groups(struct sched_domain *sd, int cpu)
 {
@@ -6099,35 +6260,126 @@ build_sched_groups(struct sched_domain *sd, int cpu)
 	struct cpumask *covered;
 	int i;
 
+	/* @cpu번째 sdd->sg, sdd->sgc를 구해서 인자로 넘긴 sd->groups에 설정해서 리턴한다.*/
+	/* 이 함수가 반복되면 동일한   */
 	get_group(cpu, sdd, &sd->groups);
 	atomic_inc(&sd->groups->ref);
 
+	/* sd에 속한 first cpu가 아니라면 리턴.
+	 * MC Domain의 경우 {0,1}, {2,3}
+	 * cpu 1,3의 경우 자신만의 sg로 sd->groups가 초기화된 후 리턴
+	 * CPU Domain의 경우 {0,1,2,3}
+	 * cpu 1,2,3의 경우 자신만의 sg로 sd->groups가 초기화된 후 리턴
+	 */
 	if (cpu != cpumask_first(span))
 		return 0;
 
 	lockdep_assert_held(&sched_domains_mutex);
 	covered = sched_domains_tmpmask;
 
+	/* domain에 속한 cpu중 ??  */
 	cpumask_clear(covered);
 
+	/* MC Domain의 경우 {0,1}, {2,3}
+	 * CPU Domain의 경우 {0,1,2,3}
+	 */
 	for_each_cpu(i, span) {
 		struct sched_group *sg;
 		int group, j;
 
+		/* 이미 아래 for()에서 처리된(covered) cpu라면 패스.. */
 		if (cpumask_test_cpu(i, covered))
 			continue;
 
+		/* sdd의 i번째 sg, sgc를 연결함.
+		 * i번째 sg를 @sg에 설정함.
+		 * sg, sgc를 구하는데 사용한 cpu id를 리턴함.
+		 *
+		 * MC Domain의 경우의 리턴값 
+		 * -----> 0->0, 1->1, 2->2, 3->3을 리턴하고 i번째 sg,sgc를 사용함.
+		 * CPU Domain의 경우의 리턴값
+		 * -----> {0,1} -> 0, {2,3}->2 리턴하고 각각 0,2번째 sg,sgc를 사용함.
+		 */
 		group = get_group(i, sdd, &sg);
-		cpumask_setall(sched_group_mask(sg));
+		cpumask_setall(sched_group_mask(sg)); /* sg->sgc->cpumask를 all set함(< nr_cpus) */
 
+		/* MC Domain의 경우 {0,1}. {2,3}
+		 * CPU Domain의 경우 {0,1,2,3}
+		 */
 		for_each_cpu(j, span) {
+			/* 
+			get_group()은 j 아니면 child sd의 first cpu를 리턴함..
+			child sd가 없다고 가정하면 늘 j를 리턴할것임.
+			이 시점에서 get_group()은 늘 j를 리턴하고 group은 i일것임.
+			i와 j가 같지 않은 경우만 covered, sg->cpumask에 설정함.. 
+
+			동일한 child sd를 갖고 있는 sd에 속한 cpu가 아니라면 continue
+			*/
+			/* mc level에서는 child sd가 없으므로 늘 첫번째 인자가 리턴값으로 쓰임..
+			group은 위에서 i를 인자로 넘긴 get_group에서 받은값이므로 i임.
+			따라서 i,j가 같은 cpu를 가리키지 않으면 이 반복문은 계속 continue됨..
+			group당 cpu 1개씩 갖게됨.. 그림 필요..
+
+			그대신 cpu level에서는 child sd(mc)가 있으므로 child sd에 속한 first cpu가
+			리턴값이 됨. 이말은 child sd에 속하지 않은 나머지 cpu의 경우엔 반복문이
+			continue된다는 것임..
+			*/
+			/* get_group()은 @sg가 NULL일 경우 cpu id를 리턴해줌. 
+			 * MC Domain의 경우의 리턴값 
+			 * -----> 0->0, 1->1, 2->2, 3->3을 리턴하고 i번째 sg,sgc를 사용함.
+			 * CPU Domain의 경우의 리턴값
+			 * -----> {0,1} -> 0, {2,3}->2 리턴하고 각각 0,2번째 sg,sgc를 사용함.
+			 *
+			 * MC domain인 경우(cpu 0,1)
+			 *  continue되는 경우 -> i=0 j=1 , i=1 j=0
+			 * CPU domain의 경우(cpu 0,1,2,3)
+			 *  continue되는 경우 -> i={0,1} j={2,3}, i={2,3} j={0,1}
+			 */
 			if (get_group(j, sdd, NULL) != group)
 				continue;
 
+			/* MC Domain
+			 * -> i=0, covered = {0} sg->cpumask = {0}
+			 * -> i=1, covered = {1} sg->cpumask = {1}
+			 * -> i=2, covered = {2} sg->cpumask = {2}
+			 * -> i=3, covered = {3} sg->cpumask = {3}
+			 * CPU Domain
+			 * -> i=0, covered = {0,1} sg->cpumask = {0,1}
+			 * -> i=1, covered = {0,1} sg->cpumask = {0,1}
+			 * -> i=2, covered = {2,3} sg->cpumask = {2,3}
+			 * -> i=3, covered = {2,3} sg->cpumask = {2,3}
+			 */
 			cpumask_set_cpu(j, covered);
 			cpumask_set_cpu(j, sched_group_cpus(sg));
 		}
 
+/* 4개의 sg가 순차적으로 들어온다면 아래와 같이 초기화됨..
+1 -> 2 -> 3 -> 4 -
+^                |
+|----------------|
+
+첫번째 sg만 알고 있으면 도메인에 속한 모든 sg를 알 수 있음..
+*/
+		/* first sg가 아직 없다면 지금 설정한 sg로 설정.
+		 * 늘 last는 마지막 sg를 가리키게 설정함.
+		 * 지금까지 last였던 이전 sg는 이번에 새롭게 등극할 last sg을 next로 가리키도록 설정함.
+		 *
+		 * MC Domain의 경우 {0,1}. {2,3}
+		 * first = sg[0] last = sg[0]
+		 * first = sg[0] sg[0]->next = sg[1] last = sg[1]
+		 * first = sg[0] sg[0]->next = sg[1] last = sg[1] sg[1]->next = sg[0]
+		 *
+		 * first = sg[2] last = sg[2]
+		 * first = sg[2] sg[2]->next = sg[3] last = sg[3]
+		 * first = sg[2] sg[2]->next = sg[3] last = sg[3] sg[1]->next = sg[2]
+		 *
+		 * CPU Domain의 경우 {0,1,2,3}
+		 * first = sg[0] last = sg[0]
+		 * first = sg[0] sg[0]->next = sg[1] last = sg[1]
+		 * first = sg[0] last = sg[2] sg[1]->next = sg[2]
+		 * first = sg[0] last = sg[3] sg[2]->next = sg[3]
+		 *
+		 */
 		if (!first)
 			first = sg;
 		if (last)
@@ -6155,15 +6407,25 @@ static void init_sched_groups_capacity(int cpu, struct sched_domain *sd)
 
 	WARN_ON(!sg);
 
+	/* sd에 연결된 모든 sg의 group_weight를 sg에 속한 cpu개수로 설정함.. */
 	do {
+		/* cpumask를 참고해서 sg에 속한 cpu개수를 설정함..*/
 		sg->group_weight = cpumask_weight(sched_group_cpus(sg));
 		sg = sg->next;
 	} while (sg != sd->groups);
 
+	/* sd->groups의 first cpu가 아래작업을 대표로 처리한다.
+	한번만 하면 되니까 나머지 cpu의 경우엔 그냥 리턴?*/
+	/* TODO 이해가 안가네... MC domain의 경우 같은 도메인에 속한
+	cpu라도 sd->groups가 다름. 하지만 서로를 next로 가리키고 있긴 함
+	-> 이부분을 다시 확인해봐야겠음.. */
 	if (cpu != group_balance_cpu(sg))
 		return;
 
+	/* 1) sd에 속한 첫번째 sg->sgc->next_update 갱신
+	   2) sd에 속한 첫번째 sg->sgc->capacity 갱신 */
 	update_group_capacity(sd, cpu);
+	/* sg에 속한 마지막 sg의 group_weight를 nr_busy_cpus에 설정함.. */
 	atomic_set(&sg->sgc->nr_busy_cpus, sg->group_weight);
 }
 
@@ -6213,6 +6475,8 @@ static void __free_domain_allocs(struct s_data *d, enum s_alloc what,
 {
 	switch (what) {
 	case sa_rootdomain:
+		/* root domain이 어느 cpu에도 연결되어 있지않다면 
+		 * root domain을 해제함. */
 		if (!atomic_read(&d->rd->refcount))
 			free_rootdomain(&d->rd->rcu); /* fall through */
 	case sa_sd:
@@ -6227,13 +6491,18 @@ static void __free_domain_allocs(struct s_data *d, enum s_alloc what,
 static enum s_alloc __visit_domain_allocation_hell(struct s_data *d,
 						   const struct cpumask *cpu_map)
 {
+	/* s_data d의 모든 변수를 0으로 초기화함..*/
 	memset(d, 0, sizeof(*d));
 
+	/* 1. scheduling domain topology를 위한 메모리를 할당함.  */
 	if (__sdt_alloc(cpu_map))
 		return sa_sd_storage;
+	/* 2. d->sd를 위해 추가적으로 sched_domain pointer per-cpu변수 할당 
+	why??*/
 	d->sd = alloc_percpu(struct sched_domain *);
 	if (!d->sd)
 		return sa_sd_storage;
+	/* 3. alloc rootdomain struct */
 	d->rd = alloc_rootdomain();
 	if (!d->rd)
 		return sa_sd;
@@ -6249,9 +6518,19 @@ static void claim_allocations(int cpu, struct sched_domain *sd)
 {
 	struct sd_data *sdd = sd->private;
 
+	/* @sd가 @cpu번째 sdd->sd같아야 함..아니라면 warning  */
 	WARN_ON_ONCE(*per_cpu_ptr(sdd->sd, cpu) != sd);
+	/* @cpu번째 per-cpu변수 sdd->sd가 null을 가리키도록 설정함..  */
+	/* scheduling domain topology의 sd_data는 이전까지 구축한 sd,sg,sgc를 가리키는  per-cpu포인터를
+	가지고 있음. 이중에서 sd를 가리키는 포인터를 null로 설정함.
+	자료구조를 제거하는건 아니고 단순히 가리키지 않도록만 바꾼다..*/
+	/* 얘는 d가 가리키고 있는 거 따라가면 모든 도메인은 쫒아갈 수 있으니
+	가리키는거 없앰..*/
 	*per_cpu_ptr(sdd->sd, cpu) = NULL;
 
+	/* 왜 자꾸 null로 만들지...*/
+	/* 이미 참조카운트가 1이상이라면 sg,sgc를 가리키는 포인터를 null로 만듬..  */
+	/* 이미 어딘가에 연결되어있으니 연결을 그냥 해제시켜버리는 것 같음..  */
 	if (atomic_read(&(*per_cpu_ptr(sdd->sg, cpu))->ref))
 		*per_cpu_ptr(sdd->sg, cpu) = NULL;
 
@@ -6289,6 +6568,7 @@ static int sched_domains_curr_level;
 static struct sched_domain *
 sd_init(struct sched_domain_topology_level *tl, int cpu)
 {
+	/* __visit_..에서 할당했던 sched_domain 포인터를 가져옴..*/
 	struct sched_domain *sd = *per_cpu_ptr(tl->data.sd, cpu);
 	int sd_weight, sd_flags = 0;
 
@@ -6299,14 +6579,20 @@ sd_init(struct sched_domain_topology_level *tl, int cpu)
 	sched_domains_curr_level = tl->numa_level;
 #endif
 
+	/* topology에 속한 cpu list를 가져옴..
+	mc는  cpu_coregroup_mask()
+	cpu는 cpu_cpu_mask()를 사용해 구함..
+	*/
 	sd_weight = cpumask_weight(tl->mask(cpu));
 
+	/*sd_flags 설정...*/
 	if (tl->sd_flags)
 		sd_flags = (*tl->sd_flags)();
 	if (WARN_ONCE(sd_flags & ~TOPOLOGY_SD_FLAGS,
 			"wrong sd_flags in topology description\n"))
 		sd_flags &= ~TOPOLOGY_SD_FLAGS;
 
+	/* sched_domain 설정.. */
 	*sd = (struct sched_domain){
 		.min_interval		= sd_weight,
 		.max_interval		= 2*sd_weight,
@@ -6379,6 +6665,7 @@ sd_init(struct sched_domain_topology_level *tl, int cpu)
 		sd->idle_idx = 1;
 	}
 
+	/* sched_domain과 tl->data를 연결함.. */
 	sd->private = &tl->data;
 
 	return sd;
@@ -6401,6 +6688,7 @@ static struct sched_domain_topology_level default_topology[] = {
 static struct sched_domain_topology_level *sched_domain_topology =
 	default_topology;
 
+/*왜 tl->mask가 중간에 댕그러니 있지??*/
 #define for_each_sd_topology(tl)			\
 	for (tl = sched_domain_topology; tl->mask; tl++)
 
@@ -6710,6 +6998,7 @@ static int __sdt_alloc(const struct cpumask *cpu_map)
 	struct sched_domain_topology_level *tl;
 	int j;
 
+	/* topology mc, cpu를 순회하며 sd,sg,sgc를 위한 포인터를 할당받음..  */
 	for_each_sd_topology(tl) {
 		struct sd_data *sdd = &tl->data;
 
@@ -6725,11 +7014,13 @@ static int __sdt_alloc(const struct cpumask *cpu_map)
 		if (!sdd->sgc)
 			return -ENOMEM;
 
+		/* 특정 topology를 위한 sd,sg,sgc를 할당받음..  */
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
 			struct sched_group *sg;
 			struct sched_group_capacity *sgc;
 
+			/* 왜 cpumasksize만큼 더 할당받나..  */
 			sd = kzalloc_node(sizeof(struct sched_domain) + cpumask_size(),
 					GFP_KERNEL, cpu_to_node(j));
 			if (!sd)
@@ -6763,21 +7054,29 @@ static void __sdt_free(const struct cpumask *cpu_map)
 	struct sched_domain_topology_level *tl;
 	int j;
 
+	/*sdt의 모든 토폴로지를 탐색함..*/
 	for_each_sd_topology(tl) {
+		/* 해당 토폴로지의 sd_data */
 		struct sd_data *sdd = &tl->data;
 
+		/* cpu_map에 설정된 cpu를 탐색함.. */
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
 
+			/* 토폴로지의 sd_data->sd가 null이 아니라면.. */
 			if (sdd->sd) {
 				sd = *per_cpu_ptr(sdd->sd, j);
+				/* j번째 sd가 SD_OVERLAP flag를 쓴다면.. */
 				if (sd && (sd->flags & SD_OVERLAP))
+					/* sd에 연결된 스케쥴링그룹들을 해제함..  */
 					free_sched_groups(sd->groups, 0);
 				kfree(*per_cpu_ptr(sdd->sd, j));
 			}
 
+			/* 토폴로지의 sd_data->sd가 null이 아니라면.. */
 			if (sdd->sg)
 				kfree(*per_cpu_ptr(sdd->sg, j));
+			/* 토폴로지의 sd_data->sd가 null이 아니라면.. */
 			if (sdd->sgc)
 				kfree(*per_cpu_ptr(sdd->sgc, j));
 		}
@@ -6790,21 +7089,38 @@ static void __sdt_free(const struct cpumask *cpu_map)
 	}
 }
 
+/*
+ 할당된 스케쥴링 도메인 초기화
+  - span = cpu_map & tl->mask
+  - topology 내에서의 도메인 레벨을 설정함.
+  - 자식도메인과의 연결관계설정함.
+  - 자식도메인의 cpumap이 부모도메인의 서브셋이 아니라면
+  서브셋이 되도록 수정함.
+  - @attr을 이용해서 도메인의 attribute를 설정함.
+*/
 struct sched_domain *build_sched_domain(struct sched_domain_topology_level *tl,
 		const struct cpumask *cpu_map, struct sched_domain_attr *attr,
 		struct sched_domain *child, int cpu)
 {
+	/* __visit_..어쩌고에서 할당된 sched_domain을 초기화함..  */
 	struct sched_domain *sd = sd_init(tl, cpu);
 	if (!sd)
 		return child;
 
+	/* sched_domain->span = cpu_map & tl->mask */
 	cpumask_and(sched_domain_span(sd), cpu_map, tl->mask(cpu));
 	if (child) {
+		/* child보다 1단계 높은 레벨.. */
 		sd->level = child->level + 1;
+		/* system의 최대 스케쥴링도메인 레벨을 담고 있음. 0으로 초기화..
+		배 이 함수호출시마다 최대값으로 갱신됨..*/
 		sched_domain_level_max = max(sched_domain_level_max, sd->level);
+		/* 부모 자식간에 연결관계 설정.. */
 		child->parent = sd;
 		sd->child = child;
 
+		/* child's span이 parent's span의 부분집합이여야 함.
+		그렇지 않다면 에러메세지를 찍고 교정함..*/
 		if (!cpumask_subset(sched_domain_span(child),
 				    sched_domain_span(sd))) {
 			pr_err("BUG: arch topology borken\n");
@@ -6833,9 +7149,15 @@ static int build_sched_domains(const struct cpumask *cpu_map,
 {
 	enum s_alloc alloc_state;
 	struct sched_domain *sd;
+	/* 여기에서만 쓰이는 로컬 변수임.. */
 	struct s_data d;
 	int i, ret = -ENOMEM;
 
+	/*
+	 1. alloc memory for scheduling domain topology
+	 2. alloc memory for sched_domain pointer per-cpu for s_data
+	 3. allor memory for rootdomain struct
+	*/
 	alloc_state = __visit_domain_allocation_hell(&d, cpu_map);
 	if (alloc_state != sa_rootdomain)
 		goto error;
@@ -6845,25 +7167,46 @@ static int build_sched_domains(const struct cpumask *cpu_map,
 		struct sched_domain_topology_level *tl;
 
 		sd = NULL;
+		/* smt -> mc -> cpu 순으로 토폴로지를 선택함.*/
 		for_each_sd_topology(tl) {
+			/*
+			 할당된 스케쥴링 도메인 초기화
+			  - span = cpu_map & tl->mask
+			  - topology 내에서의 도메인 레벨을 설정함.
+			  - 자식도메인과의 연결관계설정함.
+			  - 자식도메인의 cpumap이 부모도메인의 서브셋이 아니라면
+			  서브셋이 되도록 수정함.
+			  - @attr을 이용해서 도메인의 attribute를 설정함.
+			*/
 			sd = build_sched_domain(tl, cpu_map, attr, sd, i);
+			/*sched_dmain_topology의 시작 topology level의 sd만 별도로
+			d.sd가 가리키게 함..*/
 			if (tl == sched_domain_topology)
 				*per_cpu_ptr(d.sd, i) = sd;
 			if (tl->flags & SDTL_OVERLAP || sched_feat(FORCE_SD_OVERLAP))
 				sd->flags |= SD_OVERLAP;
+			/* 현재 토폴로지 레벨에서 모든 cpu를 커버할 수 있다면
+			더이상 진행하지 않고 종료함..*/
 			if (cpumask_equal(cpu_map, sched_domain_span(sd)))
 				break;
 		}
 	}
 
 	/* Build the groups for the domains */
+	/*cpu_map에 속한 각 cpu를 하나씩 선택해서
+	그 cpu가 속한 sched_domain의 계층구조를 순회하면서 
+	sched_group을 생성함..*/
 	for_each_cpu(i, cpu_map) {
+		/* i번째 cpu의 sched_domain의 계층구조를 순회함..*/
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			sd->span_weight = cpumask_weight(sched_domain_span(sd));
 			if (sd->flags & SD_OVERLAP) {
 				if (build_overlap_sched_groups(sd, i))
 					goto error;
 			} else {
+				/* @sd는 @i가 속해있는 도메인임. 
+				   이 도메인에 속한 모든 cpu를 순회하며 sg list를 만듬.
+				   @sd의 groups가 이 sg list를 가리키게 함.  */
 				if (build_sched_groups(sd, i))
 					goto error;
 			}
@@ -6871,26 +7214,42 @@ static int build_sched_domains(const struct cpumask *cpu_map,
 	}
 
 	/* Calculate CPU capacity for physical packages and nodes */
+	/* cpu_map에 있는 모든 cpu를 돌면서..*/
 	for (i = nr_cpumask_bits-1; i >= 0; i--) {
 		if (!cpumask_test_cpu(i, cpu_map))
 			continue;
 
+		/* 해당 cpu가 속한 도메인을 맨 아래부터 순회하면서..
+		여기서 놓치지말아야할것은 schedudling domain topology의 sd_data가
+		가지고 있는 sd가 아니라는것.
+		d.sd를 reclaim?한다는것...얘는 어디서 머하는데 썼지??? */
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
+			/*d에 연결된 애들을 다 null처리.. */
 			claim_allocations(i, sd);
+			/*sd에 속한 sg의 group capacity를 갱신함..*/
 			init_sched_groups_capacity(i, sd);
 		}
 	}
 
 	/* Attach the domains */
 	rcu_read_lock();
+	/* cpu_map에 기록된 모든 cpu를 돌며
+	 * scheduling domain과 root domain정보를 연결한다. */
 	for_each_cpu(i, cpu_map) {
+		/* i번째 cpu의 d.sd */
 		sd = *per_cpu_ptr(d.sd, i);
+		/*
+		 1) 불필요한 sd를 제거함
+		 2) @cpu의 런큐에 @rd root domain를 연결함
+		  - 기존에 연결된 old rd는 해체작업수행
+		 3) rq->sd = sd */
 		cpu_attach_domain(sd, d.rd, i);
 	}
 	rcu_read_unlock();
 
 	ret = 0;
 error:
+	/*sd를 초기화할 때 사용한 임시 root domain, d->sd, cpu_map을 제거함..*/
 	__free_domain_allocs(&d, alloc_state, cpu_map);
 	return ret;
 }
@@ -6917,16 +7276,20 @@ int __weak arch_update_cpu_topology(void)
 	return 0;
 }
 
+/* ndoms개수만큼의 cpumask를 할당받아 리턴함..*/
 cpumask_var_t *alloc_sched_domains(unsigned int ndoms)
 {
 	int i;
 	cpumask_var_t *doms;
 
+	/* cpumask를 @ndoms 개수만큼 할당받음.  */
 	doms = kmalloc(sizeof(*doms) * ndoms, GFP_KERNEL);
 	if (!doms)
 		return NULL;
 	for (i = 0; i < ndoms; i++) {
+		/* cpumask 할당함.*/
 		if (!alloc_cpumask_var(&doms[i], GFP_KERNEL)) {
+			/*실패하면 */
 			free_sched_domains(doms, i);
 			return NULL;
 		}
@@ -6934,6 +7297,9 @@ cpumask_var_t *alloc_sched_domains(unsigned int ndoms)
 	return doms;
 }
 
+/*왜 doms가 프리되는지 모르겠지만..
+정확히는 인자로 넘어온 doms가 멀 가리키고 있는지 모르겠지만..
+여튼 doms[]가 가리키는 애도 프리하고 doms자체도 프리함..*/
 void free_sched_domains(cpumask_var_t doms[], unsigned int ndoms)
 {
 	unsigned int i;
@@ -6953,9 +7319,14 @@ static int init_sched_domains(const struct cpumask *cpu_map)
 
 	arch_update_cpu_topology();
 	ndoms_cur = 1;
+	/* ndoms_cur개수만큼의 cpumask를 할당받아 리턴함..*/
 	doms_cur = alloc_sched_domains(ndoms_cur);
+	/* 할당에 실패하면  single cpumask인 fallback doms를 사용..
+	아직은 ndoms_cur가 1이므로 차이가 없음..*/
 	if (!doms_cur)
 		doms_cur = &fallback_doms;
+	/* doms_cur[0] = cpu_map - cpu_isolated_map)
+	 * isolated cpu를 제외하고 scheduling domain정보를 생성한다.  */
 	cpumask_andnot(doms_cur[0], cpu_map, cpu_isolated_map);
 	err = build_sched_domains(doms_cur[0], NULL);
 	register_sched_domain_sysctl();
@@ -7165,6 +7536,7 @@ void __init sched_init_smp(void)
 {
 	cpumask_var_t non_isolated_cpus;
 
+/*cpumask offstack이 비활성화되어있으면 아무것도 하지 않고 리턴..*/
 	alloc_cpumask_var(&non_isolated_cpus, GFP_KERNEL);
 	alloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 
@@ -7176,6 +7548,8 @@ void __init sched_init_smp(void)
 	 * happen.
 	 */
 	mutex_lock(&sched_domains_mutex);
+	/*scheduling domain, scheduling group을 생성함..
+	load balancing에서 사용되는 개념임..*/
 	init_sched_domains(cpu_active_mask);
 	cpumask_andnot(non_isolated_cpus, cpu_possible_mask, cpu_isolated_map);
 	if (cpumask_empty(non_isolated_cpus))
@@ -7230,6 +7604,15 @@ void __init sched_init(void)
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
 
+/*********************************************************************
+첫번째 코드블럭
+root taskgroup의 scheduling entity, runqueue(cfs, rt)를 위한 메모리를 할당함
+taskgroup이란? 필요한 이유는?
+root tg? init tg? 차이는? 존재이유??
+taskgroup에 이런 자료구조가 필요한 이유는?
+왜 하필 얘네들을, 얘네들만 초기화하는가?
+다른 애들은 언제 초기화되는가?
+*********************************************************************/
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	alloc_size += 2 * nr_cpu_ids * sizeof(void **);
 #endif
@@ -7256,6 +7639,15 @@ void __init sched_init(void)
 
 #endif /* CONFIG_RT_GROUP_SCHED */
 	}
+/*********************************************************************
+ 두번째 코드블럭
+ 1) cpumask 할당, load_balance_mask에 설정??
+ cpumask? load_balance_mask??
+ 2) realtime, deadline bandwidth 구조체 변수 초기화
+ deadline? realtime? bandwidth 구조체??
+ 3) root-domain 초기화
+ root-domain??
+*********************************************************************/
 #ifdef CONFIG_CPUMASK_OFFSTACK
 	for_each_possible_cpu(i) {
 		per_cpu(load_balance_mask, i) = (cpumask_var_t)kzalloc_node(
@@ -7277,15 +7669,33 @@ void __init sched_init(void)
 			global_rt_period(), global_rt_runtime());
 #endif /* CONFIG_RT_GROUP_SCHED */
 
+/*********************************************************************
+ 세번째 코드블럭
+ 1) root task group 관련 자료구조 초기화
+ taskgroup들간의 연결관계??
+ 2) autogroup?? init
+ autogroup??
+*********************************************************************/
 #ifdef CONFIG_CGROUP_SCHED
+	/* task_group 구조체의 slab cache를 생성함 */
 	task_group_cache = KMEM_CACHE(task_group, 0);
-
+	/* 모든 태스크그룹을 리스트로 가지고 있는 task_groups에
+	root_task_group을 추가함 */
 	list_add(&root_task_group.list, &task_groups);
+	/* root task group의 자식리스트, 형제리스트를 초기화함 */
 	INIT_LIST_HEAD(&root_task_group.children);
 	INIT_LIST_HEAD(&root_task_group.siblings);
 	autogroup_init(&init_task);
 #endif /* CONFIG_CGROUP_SCHED */
 
+/*********************************************************************
+ 네번째 코드블럭
+ 각 cpu별 스케쥴링관련 자료구조 초기화
+ 부록에 for_each 설명?
+ 1) rq 초기화, 스케쥴링관련 여러자료구조와의 연결
+ rq? cfsrq? rtrq? 왜 연결??
+ hr timer tickinit??
+*********************************************************************/
 	for_each_possible_cpu(i) {
 		struct rq *rq;
 
@@ -7319,12 +7729,19 @@ void __init sched_init(void)
 		 * We achieve this by letting root_task_group's tasks sit
 		 * directly in rq->cfs (i.e root_task_group->se[] = NULL).
 		 */
+		/* TBD
+		 * 이건 for문 밖에 있어야하지 않냐...
+		 */
 		init_cfs_bandwidth(&root_task_group.cfs_bandwidth);
+		/* root_task_group과 현재 cpu의 cfs rq를 교차연결해줌. */
 		init_tg_cfs_entry(&root_task_group, &rq->cfs, NULL, i, NULL);
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
+		/* 현재 cpu의 rt rq의 주기동안의 실행가능한 시간값을
+		 def_rt_bandwidth를 참고해서 설정함..*/
 		rq->rt.rt_runtime = def_rt_bandwidth.rt_runtime;
 #ifdef CONFIG_RT_GROUP_SCHED
+		/* root_task_group과 현재 cpu의 rt rq를 교차연결해줌. */
 		init_tg_rt_entry(&root_task_group, &rq->rt, NULL, i, NULL);
 #endif
 
@@ -7349,6 +7766,8 @@ void __init sched_init(void)
 
 		INIT_LIST_HEAD(&rq->cfs_tasks);
 
+		/* possible cpu의 런큐에 기본 root domain인
+		 * def_root_domain을 연결한다.  */
 		rq_attach_root(rq, &def_root_domain);
 #ifdef CONFIG_NO_HZ_COMMON
 		rq->nohz_flags = 0;
@@ -7357,12 +7776,22 @@ void __init sched_init(void)
 		rq->last_sched_tick = 0;
 #endif
 #endif
+		/*possible cpu마다 hrtick을 위한 timer를 생성함..
+		 실행은??*/
 		init_rq_hrtick(rq);
 		atomic_set(&rq->nr_iowait, 0);
 	}
 
+/*********************************************************************
+ 다섯번째 코드블럭
+ 1) init task, init_mm 초기화
+ load weight? sched class?
+ 2) idle init, maks map alloc, rt time set, fair class init
+*********************************************************************/
 	set_load_weight(&init_task);
 
+/* 어차피 init_idle -> __sched_fork에서 초기화할듯..
+TODO 필요없을것 같은데... 부팅도중의 current()하면 init_task가 나오나??*/
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	INIT_HLIST_HEAD(&init_task.preempt_notifiers);
 #endif
@@ -7393,6 +7822,7 @@ void __init sched_init(void)
 	/* May be allocated at isolcpus cmdline parse time */
 	if (cpu_isolated_map == NULL)
 		zalloc_cpumask_var(&cpu_isolated_map, GFP_NOWAIT);
+
 	idle_thread_set_boot_cpu();
 	set_cpu_rq_start_time();
 #endif
@@ -7589,6 +8019,11 @@ err:
 	return ERR_PTR(-ENOMEM);
 }
 
+/*
+ * task_group tg를 초기화함.
+ * 시스템의 모든 태스크그룹의 리스트인 task_groups에 추가함
+ * parent를 tg의 부모로 설정함
+ */
 void sched_online_group(struct task_group *tg, struct task_group *parent)
 {
 	unsigned long flags;
@@ -7598,8 +8033,10 @@ void sched_online_group(struct task_group *tg, struct task_group *parent)
 
 	WARN_ON(!parent); /* root should already exist */
 
+	/* parent를 새로 생성된 태스크그룹의 부모로 연결함 */
 	tg->parent = parent;
 	INIT_LIST_HEAD(&tg->children);
+	/* 부모의 자식리스트에 자신을 추가함 */
 	list_add_rcu(&tg->siblings, &parent->children);
 	spin_unlock_irqrestore(&task_group_lock, flags);
 }
@@ -7716,9 +8153,11 @@ static int tg_rt_schedulable(struct task_group *tg, void *data)
 	unsigned long total, sum = 0;
 	u64 period, runtime;
 
+	/* 태스크 그룹의 rt period, runtime을 구함. */
 	period = ktime_to_ns(tg->rt_bandwidth.rt_period);
 	runtime = tg->rt_bandwidth.rt_runtime;
 
+	/* 두개가 같은 태스크그룹이라면 d의 것을 사용.. */
 	if (tg == d->tg) {
 		period = d->rt_period;
 		runtime = d->rt_runtime;
@@ -7736,6 +8175,7 @@ static int tg_rt_schedulable(struct task_group *tg, void *data)
 	if (rt_bandwidth_enabled() && !runtime && tg_has_rt_tasks(tg))
 		return -EBUSY;
 
+	/* 부모가 주기동안 얼마큼 수행을 했는지 비율을 구함. */
 	total = to_ratio(period, runtime);
 
 	/*
@@ -7751,14 +8191,17 @@ static int tg_rt_schedulable(struct task_group *tg, void *data)
 		period = ktime_to_ns(child->rt_bandwidth.rt_period);
 		runtime = child->rt_bandwidth.rt_runtime;
 
+		/* 자식이 d->tg가 같다면 */
 		if (child == d->tg) {
 			period = d->rt_period;
 			runtime = d->rt_runtime;
 		}
 
+		/* 주기동안 사용한 cpu시간을 더함 */
 		sum += to_ratio(period, runtime);
 	}
 
+	/* 자식들이 사용한 시간이 부모의 시간보다 크다면 이상함..  */
 	if (sum > total)
 		return -EINVAL;
 

@@ -216,9 +216,14 @@ __irq_svc:
 	get_thread_info tsk
 	ldr	r8, [tsk, #TI_PREEMPT]		@ get preempt count
 	ldr	r0, [tsk, #TI_FLAGS]		@ get flags
+	// 현재 r8에는 preemt_count값이, 0에는 flag값이 있음..
+	// preempt_count가 0이라면
 	teq	r8, #0				@ if preempt count != 0
+	// preempt_count가 0이 아니라면 r0 = 0
 	movne	r0, #0				@ force flags to 0
+	// 선점이 가능한대 마침 resched가 필요하다면..
 	tst	r0, #_TIF_NEED_RESCHED
+	// svc_preemt로 점프함..
 	blne	svc_preempt
 #endif
 
@@ -230,8 +235,11 @@ ENDPROC(__irq_svc)
 
 #ifdef CONFIG_PREEMPT
 svc_preempt:
+	// r8 = lr
 	mov	r8, lr
+	// preempt_schedule_irq()를 호출함..
 1:	bl	preempt_schedule_irq		@ irq en/disable is done inside
+	// r0 = new task의 flag
 	ldr	r0, [tsk, #TI_FLAGS]		@ get new tasks TI_FLAGS
 	tst	r0, #_TIF_NEED_RESCHED
 	reteq	r8				@ go again

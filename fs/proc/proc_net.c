@@ -229,5 +229,6 @@ int __init proc_net_init(void)
 {
 	proc_symlink("net", NULL, "self/net");
 
+ 	/* register a network namespace subsystem */
 	return register_pernet_subsys(&proc_net_ns_ops);
 }

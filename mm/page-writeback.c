@@ -336,17 +336,21 @@ static unsigned long global_dirtyable_memory(void)
 {
 	unsigned long x;
 
+	/* get free pages nr */
 	x = global_page_state(NR_FREE_PAGES);
 	/*
 	 * Pages reserved for the kernel should not be considered
 	 * dirtyable, to prevent a situation where reclaim has to
 	 * clean pages in order to balance the zones.
 	 */
+	/* kernel을 위한 reserved page는 dirtyable page에서 빼준다.. */
 	x -= min(x, totalreserve_pages);
 
+	/* file page는 dirtyable page로 간주한다.. */
 	x += global_page_state(NR_INACTIVE_FILE);
 	x += global_page_state(NR_ACTIVE_FILE);
 
+	/* highmem page도 dirtyable 할 수 있다면.. */
 	if (!vm_highmem_is_dirtyable)
 		x -= highmem_dirtyable_memory(x);
 
@@ -365,7 +369,9 @@ static unsigned long global_dirtyable_memory(void)
  */
 static void domain_dirty_limits(struct dirty_throttle_control *dtc)
 {
+	/* dirtyable pages */
 	const unsigned long available_memory = dtc->avail;
+	/* dtc is for memcg domain? */
 	struct dirty_throttle_control *gdtc = mdtc_gdtc(dtc);
 	unsigned long bytes = vm_dirty_bytes;
 	unsigned long bg_bytes = dirty_background_bytes;
@@ -376,6 +382,7 @@ static void domain_dirty_limits(struct dirty_throttle_control *dtc)
 	struct task_struct *tsk;
 
 	/* gdtc is !NULL iff @dtc is for memcg domain */
+	/* get ratio, bg_ratio for memcg domains */
 	if (gdtc) {
 		unsigned long global_avail = gdtc->avail;
 
@@ -393,6 +400,7 @@ static void domain_dirty_limits(struct dirty_throttle_control *dtc)
 		bytes = bg_bytes = 0;
 	}
 
+	/* get thresh and bg_thresh */
 	if (bytes)
 		thresh = DIV_ROUND_UP(bytes, PAGE_SIZE);
 	else
@@ -403,9 +411,15 @@ static void domain_dirty_limits(struct dirty_throttle_control *dtc)
 	else
 		bg_thresh = (bg_ratio * available_memory) / 100;
 
+	/* bg_thresh is always smaller than thresh */
 	if (bg_thresh >= thresh)
 		bg_thresh = thresh / 2;
 	tsk = current;
+
+	/* 
+	 * task is rt or use PF_LESS_THROTTLE flag,
+	 * make bg_thresh,thresh big
+	 */
 	if (tsk->flags & PF_LESS_THROTTLE || rt_task(tsk)) {
 		bg_thresh += bg_thresh / 4;
 		thresh += thresh / 4;
@@ -428,9 +442,15 @@ static void domain_dirty_limits(struct dirty_throttle_control *dtc)
  */
 void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty)
 {
+	/* 
+	 * CGROUP_WRITEBACK 사용할 경우에만 의미있는 매크로 
+	 * .dom = &global_wb_domain
+	 */
 	struct dirty_throttle_control gdtc = { GDTC_INIT_NO_WB };
 
+	/* get & set dirtyable page */
 	gdtc.avail = global_dirtyable_memory();
+	/* set .thresh, .bg_thresh */
 	domain_dirty_limits(&gdtc);
 
 	*pbackground = gdtc.bg_thresh;
@@ -2041,8 +2061,11 @@ void writeback_set_ratelimit(void)
 	unsigned long background_thresh;
 	unsigned long dirty_thresh;
 
+	/* 1. set global_wb_domain's * .avail, .thresh, .bg_thresh
+	 */
 	global_dirty_limits(&background_thresh, &dirty_thresh);
 	dom->dirty_limit = dirty_thresh;
+	/* 2. reset ratelimit_pages, at least 16 pages */
 	ratelimit_pages = dirty_thresh / (num_online_cpus() * 32);
 	if (ratelimit_pages < 16)
 		ratelimit_pages = 16;
@@ -2054,6 +2077,7 @@ ratelimit_handler(struct notifier_block *self, unsigned long action,
 {
 
 	switch (action & ~CPU_TASKS_FROZEN) {
+	/* 시스템의 cpu개수가 변할 때 writeback 관련 변수를 재설정함.*/
 	case CPU_ONLINE:
 	case CPU_DEAD:
 		writeback_set_ratelimit();
@@ -2088,9 +2112,21 @@ static struct notifier_block ratelimit_nb = {
  */
 void __init page_writeback_init(void)
 {
+	/*
+	 * wb_domain_init()이 참을 리턴하면 BUG()
+	 * 1. spinlock init
+	 * 2. timer init
+	 * 3. dirty_limit_tstamp init
+	 */
 	BUG_ON(wb_domain_init(&global_wb_domain, GFP_KERNEL));
 
+	/*
+	 * 언제 writeback이 될지 결정하는 ratelimit_pages,
+	 * .avail, .thresh, .bg_thresh 를 설정함.
+	 */
 	writeback_set_ratelimit();
+	/* 시스템의 cpu 상태가 변할때마다 writeback ratelimit
+	 * 정보를 갱신하기 위한 notifier를 등록함. */
 	register_cpu_notifier(&ratelimit_nb);
 }
 

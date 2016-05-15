@@ -216,9 +216,22 @@ not_angel:
 		cmp	r0, r4
 		ldrcc	r0, LC0+32
 		addcc	r0, r0, pc
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 		cmpcc	r4, r0
 		orrcc	r4, r4, #1		@ remember we skipped cache_on
 		blcs	cache_on
+=======
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+		cmpcc	r4, r0		@ 먼가 한 후에 다시 한번 주소비교를 함
+		orrcc	r4, r4, #1	@ remember we skipped cache_on
+					@ final kern <  recalc addr일 경우
+		blcs	cache_on	@ final kern >= recalc addr일 경우
+>>>>>>> Stashed changes
 
 restart:	adr	r0, LC0
 		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}
@@ -687,10 +700,36 @@ __setup_mmu:	sub	r3, r4, #16384		@ Page directory size
  * Initialise the page tables, turning on the cacheable and bufferable
  * bits for the RAM area only.
  */
+<<<<<<< Updated upstream
+=======
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ r9 = 정렬된 page directory start addr?????
+@ r2 = page directory end addr
+@ r1
+@       [31:20]     [19][18][17][16][15][14:12][11:10][9][8:5] [4][3][2][1:0] 
+@ |section base addr|sbz| 0| nG| S |APX|  TEX  | AP  |P |Domain|XN|C| B |1|0|
+@
+@ Section Base Address:1MB/16MB 페이지 프레임의 물리 주소를 나타냅니다.
+@ SBZ: Should Be Zero. 0
+@ NG: Not Global. 글로벌 메모리 여부를 설정합니다. 
+@     TLB 플러쉬 정책과 관련있습니다.
+@ S: Shareable. 메모리 속성에 따라 공유 가능여부를 설정합니다.
+@ APX/AP: Access Permission(full access 0b11), 
+@ 접근 권한을 설정하는 필드 입니다.
+@ TEX: Type extension. 메모리 속성 설정에 사용됩니다.
+@ P: Present. 주로 스와핑에 사용됩니다.
+@ Domain: 도메인을 설정,메모리는 도메인별로 접근 권한 확인 여부를 설정할 수 있습니다. 
+@ No access, Client, Manager 세가지 타입으로 설정가능하며 총 16개 도메인이 존재합니다.
+@ XN: Execute-Never 비트(executable 0). 
+@ CPU는 해당 메모리의 코드가 실행 가능한지 결정합니다.
+@ C: Cacheable(1). 메모리 속성 설정에 사용됩니다.
+@ B: Bufferable(1). 메모리 속성 설정에 사용됩니다.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+>>>>>>> Stashed changes
 		mov	r0, r3
 		mov	r9, r0, lsr #18
-		mov	r9, r9, lsl #18		@ start of RAM
-		add	r10, r9, #0x10000000	@ a reasonable RAM size
+		mov	r9, r9, lsl #18		@ start of RAM add	r10, r9, #0x10000000	@ a reasonable RAM size
 		mov	r1, #0x12		@ XN|U + section mapping
 		orr	r1, r1, #3 << 10	@ AP=11
 		add	r2, r3, #16384
@@ -709,8 +748,15 @@ __setup_mmu:	sub	r3, r4, #16384		@ Page directory size
  * so there is no map overlap problem for up to 1 MB compressed kernel.
  * If the execution is in RAM then we would only be duplicating the above.
  */
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ flash에서 실행중이라면 이 영역도 버퍼를 활성화시킴.
+@ 현재 코드가 최대 두개의 섹션에 겹칠수있으므로 두개의 섹션을 설정함.
+@ 롬은 캐쉬사용이 불가하므로 버퍼만 활성화함.
+@ 현재주소의 상위비트를 이용하면 연관된 섹션엔트리 번호를 알수있음.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 		orr	r1, r6, #0x04		@ ensure B is set for this
-		orr	r1, r1, #3 << 10
+		orr	r1, r1, #3 << 10	@ r1 = bufferable, !XN,Section
+						@      ,rw
 		mov	r2, pc
 		mov	r2, r2, lsr #20
 		orr	r1, r1, r2, lsl #20
@@ -718,7 +764,7 @@ __setup_mmu:	sub	r3, r4, #16384		@ Page directory size
 		str	r1, [r0], #4
 		add	r1, r1, #1048576
 		str	r1, [r0]
-		mov	pc, lr
+		mov	pc, lr	@ goto blne cache_on 다음 코드
 ENDPROC(__setup_mmu)
 
 @ Enable unaligned access on v6, to allow better code generation
@@ -753,7 +799,16 @@ __armv4_mmu_cache_on:
 		mcr	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs
 #endif
 		mov	pc, r12
+<<<<<<< Updated upstream
 
+=======
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ r12 = cache를 켠 다음 돌아갈 주소(blne cache_on 다음)
+@ cpu가 MMU를 지원한다면 goto __setup__mmu
+@ __setup_mmu에서는 페이지테이블을 decompressed kernel앞에 설정함.
+@ write buffer를 drain하고 (mmu지원하면)I,D TLB를 플러시함
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+>>>>>>> Stashed changes
 __armv7_mmu_cache_on:
 		mov	r12, lr
 #ifdef CONFIG_MMU
@@ -764,8 +819,20 @@ __armv7_mmu_cache_on:
 		mov	r0, #0
 		mcr	p15, 0, r0, c7, c10, 4	@ drain write buffer
 		tst	r11, #0xf		@ VMSA
-		mcrne	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs
+		mcrne	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs when vmsa
 #endif
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ r0 = value of control register
+@ SCTLR -> system control register
+
+@ buffer, cache를 활성화함, cache 교체정책으로 rr사용
+@ align fault 체크 비활성화?? 허용?? v6 unaligned access mode 사용??
+@
+@zeroes the SCTLR.TRE prior to setting the mapping as
+@cacheable for ARMv7 cores in the decompressor, ensuring that the
+@memory region attributes are obtained from the C and B bits, not from
+@the page tables.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 		mrc	p15, 0, r0, c1, c0, 0	@ read control reg
 		bic	r0, r0, #1 << 28	@ clear SCTLR.TRE
 		orr	r0, r0, #0x5000		@ I-cache enable, RR cache replacement
@@ -773,16 +840,27 @@ __armv7_mmu_cache_on:
 		bic	r0, r0, #2		@ A (no unaligned access fault)
 		orr	r0, r0, #1 << 22	@ U (v6 unaligned access model)
 						@ (needed for ARM1176)
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ r6 = ttbcr (translation...?)
+@    += 32bit trans, ttbr0 only
+@ r0 += mmu on
+@ r3 = page table reg
+@ r1 = dac reg
+@ page table address를 ttbr0에 설정
+@ dac register를 설정.
+@ 32bit trans, ttbr0 사용한다고  ttbcr register를 설정.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 #ifdef CONFIG_MMU
  ARM_BE8(	orr	r0, r0, #1 << 25 )	@ big-endian page tables
-		mrcne   p15, 0, r6, c2, c0, 2   @ read ttb control reg
-		orrne	r0, r0, #1		@ MMU enabled
-		movne	r1, #0xfffffffd		@ domain 0 = client
+		mrcne   p15, 0, r6, c2, c0, 2   @ read ttb control reg when vmsa
+		orrne	r0, r0, #1		@ MMU enabled when vmsa
+		movne	r1, #0xfffffffd		@ domain 0 = client when vmsa
 		bic     r6, r6, #1 << 31        @ 32-bit translation system
 		bic     r6, r6, #3 << 0         @ use only ttbr0
-		mcrne	p15, 0, r3, c2, c0, 0	@ load page table pointer
-		mcrne	p15, 0, r1, c3, c0, 0	@ load domain access control
-		mcrne   p15, 0, r6, c2, c0, 2   @ load ttb control
+		mcrne	p15, 0, r3, c2, c0, 0	@ load page table pointer when vmsa
+		mcrne	p15, 0, r1, c3, c0, 0	@ load domain access control when vmsa
+		mcrne   p15, 0, r6, c2, c0, 2   @ load ttb control when vmsa
 #endif
 		mcr	p15, 0, r0, c7, c5, 4	@ ISB
 		mcr	p15, 0, r0, c1, c0, 0	@ load control register

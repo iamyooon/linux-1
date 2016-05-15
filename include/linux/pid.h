@@ -161,6 +161,8 @@ static inline bool is_child_reaper(struct pid *pid)
  * see also task_xid_nr() etc in include/linux/sched.h
  */
 
+/* global pid를 리턴함. root namespace인 init ns에서 유일한 값.. */
+/*init namespace의 pidmap의 pid nr을 리턴함.. */
 static inline pid_t pid_nr(struct pid *pid)
 {
 	pid_t nr = 0;

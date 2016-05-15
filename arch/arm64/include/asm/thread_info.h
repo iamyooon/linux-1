@@ -76,6 +76,7 @@ static inline struct thread_info *current_thread_info(void) __attribute_const__;
 /*
  * struct thread_info can be accessed directly via sp_el0.
  */
+ /*왜 sp_el0을 쓰지??*/
 static inline struct thread_info *current_thread_info(void)
 {
 	unsigned long sp_el0;

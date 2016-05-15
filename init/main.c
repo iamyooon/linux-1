@@ -390,12 +390,16 @@ static noinline void __init_refok rest_init(void)
 	 * the init task will end up wanting to create kthreads, which, if
 	 * we schedule it before we create kthreadd, will OOPS.
 	 */
+	/*pid 1인 kernel thread를 생성함.. 나중에 첫 유저프로그램인 init으로 바뀜..*/
 	kernel_thread(kernel_init, NULL, CLONE_FS);
 	numa_default_policy();
+	/* pid 2인 kernel thread kthreadd를 생성함.. */
 	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
 	rcu_read_unlock();
+	/*pid 1인 kernel thread(kernel_init()에서 대기중임..
+	끝났으니 너 할일 하라는 신호를 날림..*/
 	complete(&kthreadd_done);
 
 	/*
@@ -403,6 +407,8 @@ static noinline void __init_refok rest_init(void)
 	 * at least once to get things moving:
 	 */
 	init_idle_bootup_task(current);
+	/* 현재 커널선점이 비활성화되어있음. 이상태에서 schedule()을
+	불러 다른 다른 태스크를 수행한다..*/
 	schedule_preempt_disabled();
 	/* Call into cpu_idle with preempt disabled */
 	cpu_startup_entry(CPUHP_ONLINE);
@@ -546,34 +552,63 @@ asmlinkage __visible void __init start_kernel(void)
 	 * Disable preemption - early bootup scheduling is extremely
 	 * fragile until we cpu_idle() for the first time.
 	 */
+	// 왜 여기서 disable을 할까.. scheduling running 이 1로 초기화된
+	// 이후에는 preemption에 의한 선점이 먼가 문제를 일으키나?
 	preempt_disable();
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
+		// 아직 인터럽트를 처리할 준비가 되지 않았음..
 		local_irq_disable();
 	idr_init_cache();
 	rcu_init();
 
+	// trace?? trace_printk? CONFIG_TRACE? trace point??
 	/* trace_printk() and trace points may be used after this */
 	trace_init();
 
+	// CONFIG_CONTEXT_TRACKING_FORCE?? context tracking?
+	// 의미..언제 필요할까..
 	context_tracking_init();
 	radix_tree_init();
+	// config_sparse_irq?? early init??
+	// irq default affinity cpumask?
+	// init global irq_desc[]??
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+	// irqchip init?? 위 함수랑 관련있나?
+	// 무슨 차이일까??
 	init_IRQ();
+	// config_generic_clockevent? clockevent? tick?
+	// config_generic_clockevent_broadcast?
+	// config_tick_oneshot?
+	// config_no_hz_full?
 	tick_init();
 	rcu_init_nohz();
 	init_timers();
 	hrtimers_init();
+	// softirq??? ,open_softirq ??
+	// tasklet, tasklet_hi? these vector?
+	// tasklet_action, tasklet_hi_action?
 	softirq_init();
 	timekeeping_init();
 	time_init();
+	// config_generic_sched_clock? hw time counter?
+	// sched clock register? jiffy_sched_clock_read?
+	/* 
+	 * 조건이 맞으면 clock source로 jiffy를 등록함.
+	 * clock data의 epoch_{ns,cyc}를 갱신함..
+	 * clock source의 counter가 오버플로우될 때 clock data를 갱신하기 위한
+	 * hrtimer를 초기화하고 시작시킴.. */
 	sched_clock_postinit();
+	//printk_nmi_init();
+	// config_perf_events? perf? perf event?
 	perf_event_init();
+	// config_profiling? sched profiling?
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 	early_boot_irqs_disabled = false;
+	// why enable irq at this time?
 	local_irq_enable();
 
 	kmem_cache_init_late();
@@ -979,9 +1014,12 @@ static noinline void __init kernel_init_freeable(void)
 	/*
 	 * Wait until kthreadd is all set-up.
 	 */
+	/*kthreadd가 생성완료되었음을 reset_init()에서 전달받으면 다음 코드를 수행함..*/
 	wait_for_completion(&kthreadd_done);
 
 	/* Now the scheduler is fully set up and can do blocking allocations */
+	/* gfp_allowed_mask의 기본값은 부팅도중에 발생할 할당에 맞게 설정되어 있는것같음..
+	blocking alloc이 가능하게 바꾸는건가...부팅도중엔 blocking alloc이 안됬나??*/
 	gfp_allowed_mask = __GFP_BITS_MASK;
 
 	/*

@@ -406,19 +406,25 @@ void __init early_fixmap_init(void)
  */
 void __set_fixmap(enum fixed_addresses idx, phys_addr_t phys, pgprot_t prot)
 {
+	/* vaddr = 0xffef0000 - (idx << PAGE_SHIFT) */
 	unsigned long vaddr = __fix_to_virt(idx);
 	pte_t *pte = pte_offset_fixmap(pmd_off_k(vaddr), vaddr);
 
+	/* 유효한 idx인지 체크함.. */
 	/* Make sure fixmap region does not exceed available allocation. */
 	BUILD_BUG_ON(FIXADDR_START + (__end_of_fixed_addresses * PAGE_SIZE) >
 		     FIXADDR_END);
 	BUG_ON(idx >= __end_of_fixed_addresses);
 
+	/* fixed address의 인덱스인 idx의 pte에 물리주소 pths를 설정해줌. */
 	if (pgprot_val(prot))
 		set_pte_at(NULL, vaddr, pte,
 			pfn_pte(phys >> PAGE_SHIFT, prot));
 	else
 		pte_clear(NULL, vaddr, pte);
+	/* 가상주소 vaddr이 가리키는 phys가 갱신되었으므로
+	 * tlb를 flush해줌..
+	 */
 	local_flush_tlb_kernel_range(vaddr, vaddr + PAGE_SIZE);
 }
 

@@ -40,6 +40,8 @@ extern int nr_cpu_ids;
 #ifdef CONFIG_CPUMASK_OFFSTACK
 /* Assuming NR_CPUS is huge, a runtime limit is more efficient.  Also,
  * not all bits may be allocated. */
+ /*NR_CPUS가 클거라고 가정한다면, 실시간 제한을 사용하는게 더욱 효과적.
+ 또한 어차피 모든 비트들이 다 할당되진 않을거니까..*/
 #define nr_cpumask_bits	nr_cpu_ids
 #else
 #define nr_cpumask_bits	NR_CPUS
@@ -608,6 +610,8 @@ static inline int cpulist_parse(const char *buf, struct cpumask *dstp)
 /**
  * cpumask_size - size to allocate for a 'struct cpumask' in bytes
  */
+ /*비트가 32개 필요하다면 4바이트만 필요하고..
+ 비트가 33~64개 필요하다면 8바이트가 필요하고...*/
 static inline size_t cpumask_size(void)
 {
 	return BITS_TO_LONGS(nr_cpumask_bits) * sizeof(long);

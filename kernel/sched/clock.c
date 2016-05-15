@@ -152,6 +152,7 @@ void sched_clock_init(void)
 	u64 ktime_now = ktime_to_ns(ktime_get());
 	int cpu;
 
+	/* per-cpu 변수인 sched_clock_data를 초기화함. */
 	for_each_possible_cpu(cpu) {
 		struct sched_clock_data *scd = cpu_sdc(cpu);
 

@@ -73,6 +73,7 @@ static int irqtime = -1;
 
 core_param(irqtime, irqtime, int, 0400);
 
+/* initial jiffies 이후로 흐른 jiffies값을 리턴함..   */
 static u64 notrace jiffy_sched_clock_read(void)
 {
 	/*
@@ -83,6 +84,9 @@ static u64 notrace jiffy_sched_clock_read(void)
 }
 
 static struct clock_data cd ____cacheline_aligned = {
+	_
+	/* .mult - 1 tick에 해당하는 nanosec값.. 
+	   .read_sched_clock - clock counter를 읽어오는 함수.. */
 	.read_data[0] = { .mult = NSEC_PER_SEC / HZ,
 			  .read_sched_clock = jiffy_sched_clock_read, },
 	.actual_read_sched_clock = jiffy_sched_clock_read,
@@ -100,14 +104,18 @@ unsigned long long notrace sched_clock(void)
 	struct clock_read_data *rd;
 
 	do {
+		/*cd.seq를 읽음..*/
 		seq = raw_read_seqcount(&cd.seq);
+		/* seq의 첫비트값을 이용해서 read_data[0],[1]중 하나를 선택함*/
 		rd = cd.read_data + (seq & 1);
-
+		/* 최근에 갱신한 이후로 증가한 cyc를 구함  */
 		cyc = (rd->read_sched_clock() - rd->epoch_cyc) &
 		      rd->sched_clock_mask;
+		/* 가장 최근에 구해놓은 epoch_ns와 증가한 cyc를 더함.  */
 		res = rd->epoch_ns + cyc_to_ns(cyc, rd->mult, rd->shift);
 	} while (read_seqcount_retry(&cd.seq, seq));
 
+	/* lastest epoch_ns + 흐른시간.. */
 	return res;
 }
 
@@ -145,22 +153,31 @@ static void update_sched_clock(void)
 	u64 ns;
 	struct clock_read_data rd;
 
+	/* 첫번째 read_data를 선택함..*/
 	rd = cd.read_data[0];
 
+	/* clock_data에 설정된 clock read함수를 통해 현재 cyc를 읽어옴..*/
 	cyc = cd.actual_read_sched_clock();
+	/* 최근에 업데이트된 epoch_ns와 
+	최근에 업데이트된 이후의 cyc와 현재 cyc의 차이를 ns로 변환한 것을 더함. */
 	ns = rd.epoch_ns + cyc_to_ns((cyc - rd.epoch_cyc) & rd.sched_clock_mask, rd.mult, rd.shift);
 
+	/* 새로 갱신된 ns와 새로 읽은 cyc를 설정해줌..*/
 	rd.epoch_ns = ns;
 	rd.epoch_cyc = cyc;
 
+	/* cd.read_data 갱신.. */
 	update_clock_read_data(&rd);
 }
 
 static enum hrtimer_restart sched_clock_poll(struct hrtimer *hrt)
 {
+	/* clock info를 갱신함.. */
 	update_sched_clock();
+	/* timer의 expire time을 now + cd.wrap_kt로 갱신함.. */
 	hrtimer_forward_now(hrt, cd.wrap_kt);
 
+	/* 이 타이머를 restart 시킴.. */
 	return HRTIMER_RESTART;
 }
 
@@ -173,17 +190,23 @@ sched_clock_register(u64 (*read)(void), int bits, unsigned long rate)
 	char r_unit;
 	struct clock_read_data rd;
 
+	/* 이함수 호출이 처음이라면 cd.rate는 0임.
+	 * 이 함수가 매번 불릴때마다 rate가 기존보다 높은 놈이 아니라면
+	 * 리턴될것임..  */
 	if (cd.rate > rate)
 		return;
 
 	WARN_ON(!irqs_disabled());
 
 	/* Calculate the mult/shift to convert counter ticks to ns. */
+	/* counter의 값을 nanosec으로 변환하는데 사용하는 mult, shift를 구함 */ 
 	clocks_calc_mult_shift(&new_mult, &new_shift, rate, NSEC_PER_SEC, 3600);
 
 	new_mask = CLOCKSOURCE_MASK(bits);
+/* new clock source의 rate로 설정해줌 */
 	cd.rate = rate;
 
+/* wrap around되는 최대 값을 찾아서 설정하는것 같음..  */
 	/* Calculate how many nanosecs until we risk wrapping */
 	wrap = clocks_calc_max_nsecs(new_mult, new_shift, 0, new_mask, NULL);
 	cd.wrap_kt = ns_to_ktime(wrap);
@@ -191,9 +214,16 @@ sched_clock_register(u64 (*read)(void), int bits, unsigned long rate)
 	rd = cd.read_data[0];
 
 	/* Update epoch for new counter and update 'epoch_ns' from old counter*/
+	/* 새로운 clock source의 read()함수에서 처음으로 값을 읽어옴..
+	   이게 에포크타임?? */
 	new_epoch = read();
+	/* 기존 clock source에서 cycle 값을 읽어옴.. */
 	cyc = cd.actual_read_sched_clock();
-	ns = rd.epoch_ns + cyc_to_ns((cyc - rd.epoch_cyc) & rd.sched_clock_mask, rd.mult, rd.shift);
+	/* 기존 clock source에서 측정되었던 동작시간을 구함 */
+	ns = rd.epoch_ns + 
+	/* 기존 clock source로 측정한 흐른 시간을 ns단위로 구함??*/
+	cyc_to_ns((cyc - rd.epoch_cyc) & rd.sched_clock_mask, rd.mult, rd.shift);
+	/* clock read함수 갱신.. */
 	cd.actual_read_sched_clock = read;
 
 	rd.read_sched_clock	= read;
@@ -231,22 +261,36 @@ sched_clock_register(u64 (*read)(void), int bits, unsigned long rate)
 	pr_debug("Registered %pF as sched_clock source\n", read);
 }
 
+/*
+ * 조건이 맞으면 clock source로 jiffy를 등록함.
+ * clock data의 epoch_{ns,cyc}를 갱신함..
+ * clock source의 counter가 오버플로우될 때 clock data를 갱신하기 위한
+ * hrtimer를 초기화하고 시작시킴.. */
 void __init sched_clock_postinit(void)
 {
 	/*
 	 * If no sched_clock() function has been provided at that point,
 	 * make it the final one one.
+	 새로운 clock source로 갱신되지 않았다면..
+	 jiffy를 clock source로 등록한다..
+	 전역변수 cd, cd.read_data[]를 갱신함..
 	 */
 	if (cd.actual_read_sched_clock == jiffy_sched_clock_read)
 		sched_clock_register(jiffy_sched_clock_read, BITS_PER_LONG, HZ);
 
+	/* 두 rd의 epoch_{ns,cyc}를 갱신함..*/
 	update_sched_clock();
 
 	/*
 	 * Start the timer to keep sched_clock() properly updated and
 	 * sets the initial epoch.
 	 */
+	/* hrtimer sched_clock_timer를 아래와 같이 초기화한다. 
+	 -CLOCK_MONOTONIC으로 동작하도록..
+	 -clock counter가 wrap될 때 sched_clock_poll을 호출하도록..*/
 	hrtimer_init(&sched_clock_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	/* 이 함수는 지정된 expire time이 지나면 호출됨.
+	  - clock info를 갱신하고 다시 expire time을 설정함..*/
 	sched_clock_timer.function = sched_clock_poll;
 	hrtimer_start(&sched_clock_timer, cd.wrap_kt, HRTIMER_MODE_REL);
 }

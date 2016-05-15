@@ -218,6 +218,7 @@ static unsigned long max_addr;
 
 static struct task_struct *scan_thread;
 /* used to avoid reporting of recently allocated objects */
+/* 최근에 할당된 오브젝트에 대한 리포트를 피하기 위해 사용되는 변수 */
 static unsigned long jiffies_min_age;
 static unsigned long jiffies_last_scan;
 /* delay between automatic memory scannings */

@@ -52,6 +52,7 @@ int pid_max = PID_MAX_DEFAULT;
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
 
+/* 현재 pidmap의 번호와 offset번호를 이용해서 pid nr을 구함..*/
 static inline int mk_pid(struct pid_namespace *pid_ns,
 		struct pidmap *map, int off)
 {
@@ -71,6 +72,7 @@ struct pid_namespace init_pid_ns = {
 	.kref = {
 		.refcount       = ATOMIC_INIT(2),
 	},
+	/* pidmap의 nr_free는 PAGE_SIZE*8, pidmap의 page는 아직은 null로..*/
 	.pidmap = {
 		[ 0 ... PIDMAP_ENTRIES-1] = { ATOMIC_INIT(BITS_PER_PAGE), NULL }
 	},
@@ -151,15 +153,21 @@ static void set_last_pid(struct pid_namespace *pid_ns, int base, int pid)
 	} while ((prev != last_write) && (pid_before(base, last_write, pid)));
 }
 
+/* 
+1.pid를 할당받을 pidmap 구함
+2.사용할 pid nr을 구함 
+*/
 static int alloc_pidmap(struct pid_namespace *pid_ns)
 {
 	int i, offset, max_scan, pid, last = pid_ns->last_pid;
 	struct pidmap *map;
 
+	/*마지막으로 할당받은 pid nr의 다음 값..*/
 	pid = last + 1;
 	if (pid >= pid_max)
 		pid = RESERVED_PIDS;
 	offset = pid & BITS_PER_PAGE_MASK;
+	/* 이번에 할당할 pid가 속한 pidmap을 구함..*/
 	map = &pid_ns->pidmap[pid/BITS_PER_PAGE];
 	/*
 	 * If last_pid points into the middle of the map->page we
@@ -168,6 +176,7 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 	 */
 	max_scan = DIV_ROUND_UP(pid_max, BITS_PER_PAGE) - !offset;
 	for (i = 0; i <= max_scan; ++i) {
+		/*pidmap의 bitmap이 아직 할당전이라면 할당함..*/
 		if (unlikely(!map->page)) {
 			void *page = kzalloc(PAGE_SIZE, GFP_KERNEL);
 			/*
@@ -184,16 +193,25 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 			if (unlikely(!map->page))
 				return -ENOMEM;
 		}
+		/*pidmap에 남은 pid가 하나라도 있다면...*/
 		if (likely(atomic_read(&map->nr_free))) {
 			for ( ; ; ) {
+				/*pidmap에 pid값을 설정하고 이전값을 리턴함..
+				이전값이 0이라면 제대로 설정한것이므로 
+				pidmap에서 사용가능한 pid값을 하나 줄이고
+				마지막으로 설정한  pid값으로 설정함..*/
 				if (!test_and_set_bit(offset, map->page)) {
 					atomic_dec(&map->nr_free);
 					set_last_pid(pid_ns, last, pid);
 					return pid;
 				}
+				/*이미 쓰고 있다면??
+				다음 안쓰고 있던 pid nr을 구함..*/
 				offset = find_next_offset(map, offset);
 				if (offset >= BITS_PER_PAGE)
 					break;
+				/* 현재 pidmap의 번호와 offset번호를 
+				이용해서 pid nr을 구함..*/
 				pid = mk_pid(pid_ns, map, offset);
 				if (pid >= pid_max)
 					break;
@@ -303,19 +321,30 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	struct upid *upid;
 	int retval = -ENOMEM;
 
+	/* pid slab cache로부터 pid 구조체 한개를 할당받음.. */
 	pid = kmem_cache_alloc(ns->pid_cachep, GFP_KERNEL);
 	if (!pid)
 		return ERR_PTR(retval);
 
 	tmp = ns;
+	/*pid의 level을 pid할당을 진행한 namespace의 level과 맞춤..
+	난(pid) 이 namespace에서 할당되었다!!를 나타냄..*/
 	pid->level = ns->level;
+	/* @ns가 속한 namespace 계층구조를 level 0까지 탐색함.
+	매 상위 namespace에서 pid nr을 할당받음.
+	namespace의 계층구조에서 자식이 pid nr을 할당받으면
+	부모 namespace에서도 별도로 pid nr을 할당받음.
+	*/
 	for (i = ns->level; i >= 0; i--) {
+		/* 사용할 pid nr을 구함, map에는 사용했다고 기록됨.. */
 		nr = alloc_pidmap(tmp);
 		if (IS_ERR_VALUE(nr)) {
 			retval = nr;
 			goto out_free;
 		}
 
+		/*현재 namespace에서 할당받은 pid지만
+		모든 namespace 계층구조에서 pid nr을 다 받아서 numbers 멤버변수에 저장함..*/
 		pid->numbers[i].nr = nr;
 		pid->numbers[i].ns = tmp;
 		tmp = tmp->parent;
@@ -327,14 +356,18 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	}
 
 	get_pid_ns(ns);
+	/*pid가 사용중임을 설정함.. */
 	atomic_set(&pid->count, 1);
+	/* pid의 tasks를 초기화함..*/
 	for (type = 0; type < PIDTYPE_MAX; ++type)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
 
+	/*pid의 upid중에 현재 namespace에 맞는 upid를 구함..*/
 	upid = pid->numbers + ns->level;
 	spin_lock_irq(&pidmap_lock);
 	if (!(ns->nr_hashed & PIDNS_HASH_ADDING))
 		goto out_unlock;
+	/* upid 모두 pid_hash[]에 연결함..*/
 	for ( ; upid >= pid->numbers; --upid) {
 		hlist_add_head_rcu(&upid->pid_chain,
 				&pid_hash[pid_hashfn(upid->nr, upid->ns)]);
@@ -367,8 +400,10 @@ struct pid *find_pid_ns(int nr, struct pid_namespace *ns)
 {
 	struct upid *pnr;
 
+	/* hash table인 pid_hash에서 nr,ns를 이용해서 upid를 구함..*/
 	hlist_for_each_entry_rcu(pnr,
 			&pid_hash[pid_hashfn(nr, ns)], pid_chain)
+		/*nr, ns가 동일한 upid라면 pid를 구해서 리턴함..*/
 		if (pnr->nr == nr && pnr->ns == ns)
 			return container_of(pnr, struct pid,
 					numbers[ns->level]);
@@ -391,10 +426,7 @@ void attach_pid(struct task_struct *task, enum pid_type type)
 	struct pid_link *link = &task->pids[type];
 	hlist_add_head_rcu(&link->node, &link->pid->tasks[type]);
 }
-
-static void __change_pid(struct task_struct *task, enum pid_type type,
-			struct pid *new)
-{
+static void __change_pid(struct task_struct *task, enum pid_type type, struct pid *new) {
 	struct pid_link *link;
 	struct pid *pid;
 	int tmp;
@@ -598,6 +630,7 @@ void __init pidmap_init(void)
 				PIDS_PER_CPU_MIN * num_possible_cpus());
 	pr_info("pid_max: default: %u minimum: %u\n", pid_max, pid_max_min);
 
+	/*pid bitmap으로 쓰일 page를 한개 할당받음..*/
 	init_pid_ns.pidmap[0].page = kzalloc(PAGE_SIZE, GFP_KERNEL);
 	/* Reserve PID 0. We never call free_pidmap(0) */
 	set_bit(0, init_pid_ns.pidmap[0].page);

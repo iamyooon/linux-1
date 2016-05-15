@@ -171,12 +171,14 @@ void init_tg_rt_entry(struct task_group *tg, struct rt_rq *rt_rq,
 
 	rt_rq->highest_prio.curr = MAX_RT_PRIO;
 	rt_rq->rt_nr_boosted = 0;
+/* start 
+ * task_group과 rt_rq, rt_se를 연결해줌. 
+ */
 	rt_rq->rq = rq;
 	rt_rq->tg = tg;
-
 	tg->rt_rq[cpu] = rt_rq;
 	tg->rt_se[cpu] = rt_se;
-
+/* end  */
 	if (!rt_se)
 		return;
 
@@ -286,6 +288,9 @@ static inline void rt_set_overload(struct rq *rq)
 	if (!rq->online)
 		return;
 
+	/* rq의 root domain에 아래와 같이 기록한다
+	 * 해당 root domain에 연결된 rq->cpu에 rt task가 2개 이상이라
+	 * 오버로드된 상태이다 */
 	cpumask_set_cpu(rq->cpu, rq->rd->rto_mask);
 	/*
 	 * Make sure the mask is visible before we set
@@ -297,6 +302,7 @@ static inline void rt_set_overload(struct rq *rq)
 	 * Matched by the barrier in pull_rt_task().
 	 */
 	smp_wmb();
+	/* overload된 rt rq가 하나 증가했음을 기록함 */
 	atomic_inc(&rq->rd->rto_count);
 }
 
@@ -312,13 +318,23 @@ static inline void rt_clear_overload(struct rq *rq)
 
 static void update_rt_migration(struct rt_rq *rt_rq)
 {
+	/* 잘은 모르겠지만 rt rq에 task가 2개 이상이라면 
+	rt_nr_migratory는 rt rq에 속한 태스크가 둘이상의 cpu에서 실행가능할 때 증가함..*/
 	if (rt_rq->rt_nr_migratory && rt_rq->rt_nr_total > 1) {
+		/* 해당 rt rq가 rt task overload상태로 기록되지 않았다면
+		 * 관련 정보를 증가시켜준다.. 이미되어 있다면 증가시키지 않아야 하므로 */
 		if (!rt_rq->overloaded) {
+			/* rt_rq를 소유한 rq와 연결된 root domain에 rt task가
+			 * overload된 런큐가 있음을 기록함 */
 			rt_set_overload(rq_of_rt_rq(rt_rq));
+			/* rt task가 오버로드된 상태임을 런큐에도 기록한다 */
 			rt_rq->overloaded = 1;
 		}
+	/* rt rq에 rt task가 overload되지 않았는데 그렇다고 설정되어 있다면..*/
 	} else if (rt_rq->overloaded) {
+		/* rt_rq의 root domain에 관련정보를 빼주고..*/
 		rt_clear_overload(rq_of_rt_rq(rt_rq));
+		/* rt task가 오버로드인 상태가 아님을 rt rq에도 기록함. */
 		rt_rq->overloaded = 0;
 	}
 }
@@ -357,6 +373,7 @@ static void dec_rt_migration(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	update_rt_migration(rt_rq);
 }
 
+/* rt rq의 pushable_task list가 비어있지 않은지를 리턴함. */
 static inline int has_pushable_tasks(struct rq *rq)
 {
 	return !plist_head_empty(&rq->rt.pushable_tasks);
@@ -370,6 +387,7 @@ static void pull_rt_task(struct rq *);
 
 static inline void queue_push_tasks(struct rq *rq)
 {
+	/* pushable task가 존재하지 않으면 아무것도 안해도 됨. 리턴 */
 	if (!has_pushable_tasks(rq))
 		return;
 
@@ -392,8 +410,11 @@ static void enqueue_pushable_task(struct rq *rq, struct task_struct *p)
 		rq->rt.highest_prio.next = p->prio;
 }
 
+/* rt task인 p를 rt rq의 pushable_tasks에서 제거함
+ * pushable_tasks list에서 존재하는 가장 높은 우선순위의 태스크의 우선순위를 갱신함 */
 static void dequeue_pushable_task(struct rq *rq, struct task_struct *p)
 {
+	/* rt task p를 pushable_task list에서 제거함.. */
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 
 	/* Update the new highest prio pushable task */
@@ -482,6 +503,7 @@ static inline struct task_group *next_task_group(struct task_group *tg)
 		(iter = next_task_group(iter)) &&			\
 		(rt_rq = iter->rt_rq[cpu_of(rq)]);)
 
+/* rt_se의 계층도를 위로 올라간다.  */
 #define for_each_sched_rt_entity(rt_se) \
 	for (; rt_se; rt_se = rt_se->parent)
 
@@ -545,11 +567,14 @@ static int rt_se_boosted(struct sched_rt_entity *rt_se)
 }
 
 #ifdef CONFIG_SMP
+/* this cpu가 연결된 root domain에 연결된 모든 cpu list를 리턴함.*/
 static inline const struct cpumask *sched_rt_period_mask(void)
 {
 	return this_rq()->rd->span;
 }
 #else
+/* CONFIG_SMP가 비활성화되어있다면 this cpu만 리턴하면 되는거 아닌가??
+ * SMP가 아니면 uni-processor아닌가?? */
 static inline const struct cpumask *sched_rt_period_mask(void)
 {
 	return cpu_online_mask;
@@ -613,6 +638,8 @@ static inline int rt_rq_throttled(struct rt_rq *rt_rq)
 	return rt_rq->rt_throttled;
 }
 
+/* CONFIG_SMP가 비활성화되어있다면 this cpu만 리턴하면 되는거 아닌가??
+ * SMP가 아니면 uni-processor아닌가?? */
 static inline const struct cpumask *sched_rt_period_mask(void)
 {
 	return cpu_online_mask;
@@ -821,6 +848,8 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 	int i, idle = 1, throttled = 0;
 	const struct cpumask *span;
 
+	/* this cpu와 연결된 root doamin의 span을 통해 
+	 * root_domain에 연결된 모든 cpu list를 구함 */
 	span = sched_rt_period_mask();
 #ifdef CONFIG_RT_GROUP_SCHED
 	/*
@@ -1222,6 +1251,7 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 	struct rt_prio_array *array = &rt_rq->active;
 	struct rt_rq *group_rq = group_rt_rq(rt_se);
+	/* rt scheduling entity의 우선순위에 맞는 queue를 rt_rq->active에서 찾음 */
 	struct list_head *queue = array->queue + rt_se_prio(rt_se);
 
 	/*
@@ -1236,6 +1266,9 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 		return;
 	}
 
+	/* array의 queue에 rt scheduling entity를 연결해서 스케쥴링이 되게 함
+	 * queue에 집어넣었으므로 rt_se에도 이를 표시해줌.
+	 * move_entity가 무슨 의미이지?? */
 	if (move_entity(flags)) {
 		WARN_ON_ONCE(rt_se->on_list);
 		if (flags & ENQUEUE_HEAD)
@@ -1243,6 +1276,8 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 		else
 			list_add_tail(&rt_se->run_list, queue);
 
+		/* rt se가 queue에 추가되면 rt se의 우선순위에 맞는 비트를 active bitmap에 
+		   설정해준다. 이 우선순위의 rt se가 있음을 알린다..*/
 		__set_bit(rt_se_prio(rt_se), array->bitmap);
 		rt_se->on_list = 1;
 	}
@@ -1488,6 +1523,7 @@ static void check_preempt_curr_rt(struct rq *rq, struct task_struct *p, int flag
 #endif
 }
 
+/* 가장 높은 우선순위의 스케쥴링가능한 rt se를 리턴해줌 */
 static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 						   struct rt_rq *rt_rq)
 {
@@ -1496,15 +1532,19 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	struct list_head *queue;
 	int idx;
 
+	/* 스케쥴링될 rt task가 존재하는 가장 높은 우선순위를 리턴해줌 */
 	idx = sched_find_first_bit(array->bitmap);
 	BUG_ON(idx >= MAX_RT_PRIO);
 
+	/* 위에서 구한 우선순위의 queue를 구함 */
 	queue = array->queue + idx;
+	/* queue의 첫번째에 위치한 rt se를 찾아 리턴함 */
 	next = list_entry(queue->next, struct sched_rt_entity, run_list);
-
 	return next;
 }
 
+/* 런큐에 enqueue된 가장 높은 우선순위의 rt se의 task_struct구조체를 리턴해줌.
+ * rt se의 실행시간이 갱신됨.. 곧 실행될것이므로...*/
 static struct task_struct *_pick_next_task_rt(struct rq *rq)
 {
 	struct sched_rt_entity *rt_se;
@@ -1512,12 +1552,16 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 	struct rt_rq *rt_rq  = &rq->rt;
 
 	do {
+		/* 가장 높은 우선순위의 스케쥴링가능한 rt se를 리턴해줌 */
 		rt_se = pick_next_rt_entity(rq, rt_rq);
 		BUG_ON(!rt_se);
+		/* rt se가 가지고 있는 rt_rq */
 		rt_rq = group_rt_rq(rt_se);
+	/* rt task group이라면??? */
 	} while (rt_rq);
 
 	p = rt_task_of(rt_se);
+	/* 먼지 모르겠지만 rt se의 실행시각을 갱신해줌..*/
 	p->se.exec_start = rq_clock_task(rq);
 
 	return p;
@@ -1561,8 +1605,12 @@ pick_next_task_rt(struct rq *rq, struct task_struct *prev)
 
 	put_prev_task(rq, prev);
 
+	/* 런큐에 enqueue된 가장 높은 우선순위의 rt se의 task_struct구조체를 리턴해줌.
+	 * rt se의 실행시간이 갱신됨.. 곧 실행될것이므로...*/
 	p = _pick_next_task_rt(rq);
 
+	/* rt task인 p를 rt rq의 pushable_tasks에서 제거함
+	 * pushable_tasks list의 highest priority를 갱신함 */
 	/* The running task is never eligible for pushing */
 	dequeue_pushable_task(rq, p);
 
@@ -2029,6 +2077,7 @@ static void pull_rt_task(struct rq *this_rq)
 	struct task_struct *p;
 	struct rq *src_rq;
 
+	/* this rq가 속한 rood doamin의 rto_count가 0이라면 리턴 */
 	if (likely(!rt_overloaded(this_rq)))
 		return;
 
@@ -2132,6 +2181,8 @@ static void task_woken_rt(struct rq *rq, struct task_struct *p)
 /* Assumes rq->lock is held */
 static void rq_online_rt(struct rq *rq)
 {
+	// rq의 cpu가 이미 overload된 상태라면..
+	// rto_mask에 설정해야겠지...
 	if (rq->rt.overloaded)
 		rt_set_overload(rq);
 

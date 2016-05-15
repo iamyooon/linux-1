@@ -8,11 +8,38 @@
 #include <asm/kmap_types.h>
 #include <asm/pgtable.h>
 
+/*
+----------------------------
+| 0 = FIX_EARLYCON_MEM_BASE |
+-----------------------------
+| 1 = __end_of_permanent_   |
+|            fixed_addressed|
+| 1 = FIX_KMAP_BEGIN        |
+| 1 = FIX_BTMAP_END         |
+-----------------------------
+| 64(1+(16*4)-1)            |
+|   = FIX_KMAP_END          |
+-----------------------------
+| 65 = FIX_TEXT_POKE0       |
+-----------------------------
+| 66 = FIX_TEXT_POKE1       |
+-----------------------------
+| 67 = __end_of_fixmap      |
+|                  _region  |
+-----------------------------
+| 223 = FIX_BTMAP_BEGIN     |
+-----------------------------
+| 224 = __end_of_early      |
+|           _ioremap_region |
+-----------------------------
+*/
 enum fixed_addresses {
-	FIX_EARLYCON_MEM_BASE,
-	__end_of_permanent_fixed_addresses,
-
+	FIX_EARLYCON_MEM_BASE,	/* FIXADDR_TOP */
+	__end_of_permanent_fixed_addresses, /* FIXADDR_TOP - 1*/
 	FIX_KMAP_BEGIN = __end_of_permanent_fixed_addresses,
+	/* 
+	 * (16*NR_CPUS) - 1
+	 */
 	FIX_KMAP_END = FIX_KMAP_BEGIN + (KM_TYPE_NR * NR_CPUS) - 1,
 
 	/* Support writing RO kernel text via kprobes, jump labels, etc. */
@@ -26,6 +53,7 @@ enum fixed_addresses {
 	 * not to clash since early_ioremap() is only available before
 	 * paging_init(), and kmap() only after.
 	 */
+
 #define NR_FIX_BTMAPS		32
 #define FIX_BTMAPS_SLOTS	7
 #define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
@@ -35,6 +63,7 @@ enum fixed_addresses {
 	__end_of_early_ioremap_region
 };
 
+/* 둘 중에 큰 값을 fixed addr의 끝주소로 씀.. */
 static const enum fixed_addresses __end_of_fixed_addresses =
 	__end_of_fixmap_region > __end_of_early_ioremap_region ?
 	__end_of_fixmap_region : __end_of_early_ioremap_region;

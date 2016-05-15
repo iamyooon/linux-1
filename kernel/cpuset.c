@@ -2102,17 +2102,24 @@ int __init cpuset_init(void)
 {
 	int err = 0;
 
+/* top_cpuset의 cpumap 2개를 할당받는다..
+ * cpuset ? top_cpuset? cpus_allowed? effective_cpus?
+ */
 	if (!alloc_cpumask_var(&top_cpuset.cpus_allowed, GFP_KERNEL))
 		BUG();
 	if (!alloc_cpumask_var(&top_cpuset.effective_cpus, GFP_KERNEL))
 		BUG();
 
+/* set cpumap as all cpu  */
 	cpumask_setall(top_cpuset.cpus_allowed);
 	nodes_setall(top_cpuset.mems_allowed);
 	cpumask_setall(top_cpuset.effective_cpus);
 	nodes_setall(top_cpuset.effective_mems);
+/* set cpumap as all cpu  */
 
+	/* frequency meter init  */
 	fmeter_init(&top_cpuset.fmeter);
+	/* CS_SCHED_LOAD_BALANCE bit를 설정함..  */
 	set_bit(CS_SCHED_LOAD_BALANCE, &top_cpuset.flags);
 	top_cpuset.relax_domain_level = -1;
 

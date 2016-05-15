@@ -350,6 +350,7 @@ void calc_global_load(unsigned long ticks)
 {
 	long active, delta;
 
+	/* 10tick이 아직 안지났다면.. */
 	if (time_before(jiffies, calc_load_update + 10))
 		return;
 
@@ -367,6 +368,7 @@ void calc_global_load(unsigned long ticks)
 	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
 	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
 
+	/* 이 지긋지긋한 계산을  */
 	calc_load_update += LOAD_FREQ;
 
 	/*

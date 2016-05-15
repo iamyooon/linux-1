@@ -138,6 +138,7 @@ static const struct inode_operations proc_file_inode_operations = {
  * returns the struct proc_dir_entry for "/proc/tty/driver", and
  * returns "serial" in residual.
  */
+/* 인자 name의 proc_dir_entry, 남은 마지막 문자열의 시작을 리턴해줌. */
 static int __xlate_proc_name(const char *name, struct proc_dir_entry **ret,
 			     const char **residual)
 {

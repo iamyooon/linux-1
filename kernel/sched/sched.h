@@ -222,8 +222,8 @@ extern struct list_head task_groups;
 struct cfs_bandwidth {
 #ifdef CONFIG_CFS_BANDWIDTH
 	raw_spinlock_t lock;
-	ktime_t period;
-	u64 quota, runtime;
+	ktime_t period; /* task group의 실행주기 */
+	u64 quota, runtime; /* task group이 주기동안 실행할수 있는 시간, 실행한 시간 */
 	s64 hierarchical_quota;
 	u64 runtime_expires;
 
@@ -358,7 +358,7 @@ struct cfs_bandwidth { };
 
 /* CFS-related fields in a runqueue */
 struct cfs_rq {
-	struct load_weight load;
+	struct load_weight load; /* cfs_rq에 enqueue된 entity의 load.weight의 합..  */
 	unsigned int nr_running, h_nr_running;
 
 	u64 exec_clock;
@@ -534,12 +534,16 @@ struct dl_rq {
  */
 struct root_domain {
 	atomic_t refcount;
+	/* root domain에 overload인 rt rq의 개수를 담고 있음 */
 	atomic_t rto_count;
 	struct rcu_head rcu;
+	/* 루트도메인에 연결된 cpu의 정보를 가지고 있음.*/
 	cpumask_var_t span;
+	/* 루트도메인에 연결된 cpu중에 온라인상태인 cpu의 정보를 가지고 있음 */
 	cpumask_var_t online;
 
 	/* Indicate more than one runnable task for any CPU */
+	/* root domain에 속한 cpu중 하나라도 overload되어 있을 경우 설정됨.*/
 	bool overload;
 
 	/*
@@ -555,6 +559,7 @@ struct root_domain {
 	 * The "RT overload" flag: it gets set if a CPU has more than
 	 * one runnable RT task.
 	 */
+	/* root domain에 overload인 rt rq의 cpu번호를 비트로 담고 있음 */
 	cpumask_var_t rto_mask;
 	struct cpupri cpupri;
 };
@@ -819,10 +824,12 @@ extern void sched_ttwu_pending(void);
  *
  * Returns the highest sched_domain of a cpu which contains the given flag.
  */
+/* cpu가 속한 도메인중에 @flag를 가지고 있는 highest 도메인을 리턴함.  */
 static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd, *hsd = NULL;
 
+	/* cpu_rq(cpu)->sd  */
 	for_each_domain(cpu, sd) {
 		if (!(sd->flags & flag))
 			break;
@@ -832,6 +839,9 @@ static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 	return hsd;
 }
 
+/* @flag를 쓰고 있는 @cpu의 최하위도메인,
+ * @flag를 쓰는 도메인이 없다면 NULL을 리턴함.
+ */
 static inline struct sched_domain *lowest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd;
@@ -948,19 +958,25 @@ static inline void sched_ttwu_pending(void) { }
  */
 static inline struct task_group *task_group(struct task_struct *p)
 {
+	/*별도로 초기화하지 않으면 root taskgroup을 가리킴..*/
 	return p->sched_task_group;
 }
 
 /* Change a task's cfs_rq and parent entity if it moves across CPUs/groups */
+/* 태스트 @p가 enqueue될 cfs_rq, 부모 se로 태스크그룹의 cfs_rq, se를 지정  */
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
 {
 #if defined(CONFIG_FAIR_GROUP_SCHED) || defined(CONFIG_RT_GROUP_SCHED)
+	/* 태스크가 연결된 태스크그룹을 구함..  */
 	struct task_group *tg = task_group(p);
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
+	/* TBD set 하는건 안보이는데??? */
 	set_task_rq_fair(&p->se, p->se.cfs_rq, tg->cfs_rq[cpu]);
+	/* 태스크 @p가 enqueue될 cfs_rq를 태스크그룹의 cfs_rq로 설정 */
 	p->se.cfs_rq = tg->cfs_rq[cpu];
+	/* 태스크 @p의 부모 sched_entity로 태스크 그룹의 se로 설정 */
 	p->se.parent = tg->se[cpu];
 #endif
 
@@ -969,7 +985,6 @@ static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
 	p->rt.parent = tg->rt_se[cpu];
 #endif
 }
-
 #else /* CONFIG_CGROUP_SCHED */
 
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu) { }
@@ -980,8 +995,11 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 #endif /* CONFIG_CGROUP_SCHED */
 
+/* 태스트 @p가 enqueue될 cfs_rq, 부모 se로 태스크그룹의 cfs_rq, se를 지정  */
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
+	/* 태스트 @p가 enqueue될 cfs_rq, 부모 se로 
+	  태스크그룹의 cfs_rq, se를 지정  */
 	set_task_rq(p, cpu);
 #ifdef CONFIG_SMP
 	/*
@@ -990,7 +1008,9 @@ static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 	 * per-task data have been completed by this moment.
 	 */
 	smp_wmb();
+	/* 태스크 @p의 thread_info의 cpu값을 @cpu로 설정.. */
 	task_thread_info(p)->cpu = cpu;
+	/* ??  */
 	p->wake_cpu = cpu;
 #endif
 }
@@ -1064,6 +1084,7 @@ static inline int task_running(struct rq *rq, struct task_struct *p)
 #endif
 }
 
+/* task on queue? */
 static inline int task_on_rq_queued(struct task_struct *p)
 {
 	return p->on_rq == TASK_ON_RQ_QUEUED;

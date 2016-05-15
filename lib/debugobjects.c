@@ -19,6 +19,7 @@
 #include <linux/hash.h>
 
 #define ODEBUG_HASH_BITS	14
+// 16k
 #define ODEBUG_HASH_SIZE	(1 << ODEBUG_HASH_BITS)
 
 #define ODEBUG_POOL_SIZE	1024
@@ -115,6 +116,7 @@ static struct debug_obj *lookup_object(void *addr, struct debug_bucket *b)
 	struct debug_obj *obj;
 	int cnt = 0;
 
+	// 특정버켓의 리스트에 이미 존재한다면 연관된 debug_obj를 리
 	hlist_for_each_entry(obj, &b->list, node) {
 		cnt++;
 		if (obj->object == addr)
@@ -123,6 +125,7 @@ static struct debug_obj *lookup_object(void *addr, struct debug_bucket *b)
 	if (cnt > debug_objects_maxchain)
 		debug_objects_maxchain = cnt;
 
+	// 동일한 오브젝트가 버켓의 list없다면 NULL 리턴..
 	return NULL;
 }
 
@@ -311,12 +314,16 @@ __debug_object_init(void *addr, struct debug_obj_descr *descr, int onstack)
 
 	fill_pool();
 
+// get bucket of addr
 	db = get_bucket((unsigned long) addr);
 
 	raw_spin_lock_irqsave(&db->lock, flags);
 
+// already inserted??
 	obj = lookup_object(addr, db);
+// not yet
 	if (!obj) {
+		// get obj of addr
 		obj = alloc_object(addr, db, descr);
 		if (!obj) {
 			debug_objects_enabled = 0;
@@ -329,6 +336,7 @@ __debug_object_init(void *addr, struct debug_obj_descr *descr, int onstack)
 
 	switch (obj->state) {
 	case ODEBUG_STATE_NONE:
+	//maybe obj is in here. change to init status
 	case ODEBUG_STATE_INIT:
 	case ODEBUG_STATE_INACTIVE:
 		obj->state = ODEBUG_STATE_INIT;
@@ -403,6 +411,7 @@ int debug_object_activate(void *addr, struct debug_obj_descr *descr)
 	raw_spin_lock_irqsave(&db->lock, flags);
 
 	obj = lookup_object(addr, db);
+	// obj가 이미 리스트에 있다면..
 	if (obj) {
 		switch (obj->state) {
 		case ODEBUG_STATE_INIT:

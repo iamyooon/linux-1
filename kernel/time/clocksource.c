@@ -46,10 +46,13 @@
  *
  * The function evaluates the shift/mult pair for the scaled math
  * operations of clocksources and clockevents.
+ * shift/mult를 계산하는 함수임.
  *
  * @to and @from are frequency values in HZ. For clock sources @to is
  * NSEC_PER_SEC == 1GHz and @from is the counter frequency. For clock
  * event @to is the counter frequency and @from is NSEC_PER_SEC.
+ @to, @from은 주기에 대한 HZ단위의 값이다. for clock source, @to는
+ 1ghz의 주기를 가지고 있고 @from은 counter의 주기이다. 
  *
  * The @maxsec conversion range argument controls the time frame in
  * seconds which must be covered by the runtime conversion with the
@@ -58,6 +61,8 @@
  * multiplied with the calculated mult factor. Larger ranges may
  * reduce the conversion accuracy by chosing smaller mult and shift
  * factors.
+ @maxsec 는 변환범위에 대한 인자이다. 초단위의 time frame을 제어한다. 
+ time frame in seconds는 runtime conversion에 의해 cover되어야 한다.
  */
 void
 clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
@@ -68,8 +73,10 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 	/*
 	 * Calculate the shift factor which is limiting the conversion
 	 * range:
+	 두 개 곱한것의 상위 32비트값만 구함..
 	 */
 	tmp = ((u64)maxsec * from) >> 32;
+	/* 상위 32비트값중 실제로 존재하는 비트개수만큼 sftacc에서 뺌..  */
 	while (tmp) {
 		tmp >>=1;
 		sftacc--;
@@ -83,6 +90,8 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 		tmp = (u64) to << sft;
 		tmp += from / 2;
 		do_div(tmp, from);
+		/* 후보 multipier를 후보 shift 나눴더니 0이라면 
+		최적으로 mult/shift값임....  */
 		if ((tmp >> sftacc) == 0)
 			break;
 	}
@@ -518,8 +527,11 @@ u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cy
 	/*
 	 * Calculate the maximum number of cycles that we can pass to the
 	 * cyc2ns() function without overflowing a 64-bit result.
+	 cyc2ns() 함수에 전달할 수 있는 최대 cycle값을 계산한다.
+	 cyc2ns()는 전달받은 cycle 값을 적절한 ns로 변환해 리턴한다.
 	 */
 	max_cycles = ULLONG_MAX;
+	/* 최대값의 cycle을 가정하고 multipier로 나눈다. */
 	do_div(max_cycles, mult+maxadj);
 
 	/*
@@ -527,7 +539,12 @@ u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cy
 	 * determined by the minimum of max_cycles and mask.
 	 * Note: Here we subtract the maxadj to make sure we don't sleep for
 	 * too long if there's a large negative adjustment.
+	 실제 최대 cycle값은 minumum max_cycles와 mask에 의해 결정된다.
+	 이 cycle값은 clocksource를 지연시킬 수 있는 시간을 나타냄?
+	 여기서 우리는 maxadj값을 mult에서 뺀다. 왜냐하면 최대한 잠들수있는
+	 값을 너무 크게 가질 수 없게 하기 위해서임. 큰 수의 negative adjustment가 있다면..
 	 */
+	/* 최소 값의 max_cycle값을 구함..  */
 	max_cycles = min(max_cycles, mask);
 	max_nsecs = clocksource_cyc2ns(max_cycles, mult - maxadj, shift);
 

@@ -327,6 +327,7 @@ struct cgroup_root {
 	/* Number of cgroups in the hierarchy, used only for /proc/cgroups */
 	atomic_t nr_cgrps;
 
+	// cgroup hier에 하위 cgroup mount횟수가 늘어날때마다 증가함.
 	/* A list running through the active hierarchies */
 	struct list_head root_list;
 

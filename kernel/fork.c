@@ -355,6 +355,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	if (!ti)
 		goto free_tsk;
 
+	/* 새로 할당받은 task_struct를 기존의 task_struct 내용으로 덮어씌움..*/
 	err = arch_dup_task_struct(tsk, orig);
 	if (err)
 		goto free_ti;
@@ -370,6 +371,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->seccomp.filter = NULL;
 #endif
 
+	/* @orig의 kernel stack을 new task 'tsk'가 가리키게 한다..  */
 	setup_thread_stack(tsk, orig);
 	clear_user_return_notifier(tsk);
 	clear_tsk_need_resched(tsk);
@@ -1236,6 +1238,7 @@ static void posix_cpu_timers_init(struct task_struct *tsk)
 	INIT_LIST_HEAD(&tsk->cpu_timers[2]);
 }
 
+/* task의 pid를 설정함.. p->pid와는 좀 다른것 같은데.. */
 static inline void
 init_task_pid(struct task_struct *task, enum pid_type type, struct pid *pid)
 {
@@ -1467,6 +1470,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto bad_fork_cleanup_io;
 
 	if (pid != &init_struct_pid) {
+		/* pid 구조체를 하나 할당받음.. */
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children);
 		if (IS_ERR(pid)) {
 			retval = PTR_ERR(pid);
@@ -1508,17 +1512,21 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	clear_all_latency_tracing(p);
 
 	/* ok, now we should be set up.. */
+	/* global pid를 리턴함. root namespace인 init ns에서 유일한 값.. */
 	p->pid = pid_nr(pid);
 	if (clone_flags & CLONE_THREAD) {
 		p->exit_signal = -1;
 		p->group_leader = current->group_leader;
 		p->tgid = current->tgid;
+	/* thread생성하는 copy_process가 아니라면.. */
 	} else {
 		if (clone_flags & CLONE_PARENT)
 			p->exit_signal = current->group_leader->exit_signal;
 		else
 			p->exit_signal = (clone_flags & CSIGNAL);
+		/* 당연한 얘기지만 쓰레드그룹의 leader를 이번에 새롭게 생성한 태스크로 지정함..*/
 		p->group_leader = p;
+		/* 쓰레드그룹의 id는 당연히 리더의 id로..*/
 		p->tgid = p->pid;
 	}
 
@@ -1582,9 +1590,12 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	if (likely(p->pid)) {
 		ptrace_init_task(p, (clone_flags & CLONE_PTRACE) || trace);
 
+		/* p->pids[PIDTYPE_PID] = pid  */
 		init_task_pid(p, PIDTYPE_PID, pid);
 		if (thread_group_leader(p)) {
+			/* p->pids[PIDTYPE_PGID] = ???  */
 			init_task_pid(p, PIDTYPE_PGID, task_pgrp(current));
+			/* p->pids[PIDTYPE_SID] = ???  */
 			init_task_pid(p, PIDTYPE_SID, task_session(current));
 
 			if (is_child_reaper(pid)) {

@@ -1126,6 +1126,8 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 
 	cpu_base = raw_cpu_ptr(&hrtimer_bases);
 
+	/* CLOCK_REALTIME를 사용할 땐  HRTIMER_MOD_ABS가 함께 쓰여야 함.
+	 HRTIMER_MOD_ABS가 아닐 경우 CLOCK_MONOTONIC으로 변경함..*/
 	if (clock_id == CLOCK_REALTIME && mode != HRTIMER_MODE_ABS)
 		clock_id = CLOCK_MONOTONIC;
 

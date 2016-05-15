@@ -32,9 +32,9 @@ struct task_struct *idle_thread_get(unsigned int cpu)
 	if (!tsk)
 		return ERR_PTR(-ENOMEM);
 	init_idle(tsk, cpu);
-	return tsk;
-}
+	return tsk; }
 
+/* 현재 코드를 수행하는 current를 idle_threads로 설정함..  */
 void __init idle_thread_set_boot_cpu(void)
 {
 	per_cpu(idle_threads, smp_processor_id()) = current;

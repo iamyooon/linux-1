@@ -17,12 +17,14 @@ struct pidmap {
 
 #define BITS_PER_PAGE		(PAGE_SIZE * 8)
 #define BITS_PER_PAGE_MASK	(BITS_PER_PAGE-1)
+/* entry = 1 */
 #define PIDMAP_ENTRIES		((PID_MAX_LIMIT+BITS_PER_PAGE-1)/BITS_PER_PAGE)
 
 struct fs_pin;
 
 struct pid_namespace {
 	struct kref kref;
+	/* entry = 1 */
 	struct pidmap pidmap[PIDMAP_ENTRIES];
 	struct rcu_head rcu;
 	int last_pid;

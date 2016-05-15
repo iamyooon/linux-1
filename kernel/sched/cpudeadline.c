@@ -209,10 +209,12 @@ int cpudl_init(struct cpudl *cp)
 {
 	int i;
 
+	/* memset cp as zero */
 	memset(cp, 0, sizeof(*cp));
 	raw_spin_lock_init(&cp->lock);
 	cp->size = 0;
 
+	/* alloc memory for cpudl_item struct * nr_cpu_dis and clear it as zero */
 	cp->elements = kcalloc(nr_cpu_ids,
 			       sizeof(struct cpudl_item),
 			       GFP_KERNEL);
@@ -224,6 +226,7 @@ int cpudl_init(struct cpudl *cp)
 		return -ENOMEM;
 	}
 
+	/*nr_cpu_ids는 possible_cpu보다 작지 않은가 보다...*/
 	for_each_possible_cpu(i)
 		cp->elements[i].idx = IDX_INVALID;
 

@@ -126,6 +126,7 @@
 #if defined(CONFIG_DEBUG_PREEMPT) || defined(CONFIG_PREEMPT_TRACER)
 extern void preempt_count_add(int val);
 extern void preempt_count_sub(int val);
+/* 선점카운트를 1감소시켰을때 선점이 가능하고 필요하다면 true리턴..*/
 #define preempt_count_dec_and_test() \
 	({ preempt_count_sub(1); should_resched(0); })
 #else
@@ -156,9 +157,12 @@ do { \
 
 #define preempt_enable_no_resched() sched_preempt_enable_no_resched()
 
+/* 선점이 가능하고 irq가 활성화되어 있다면.. */
 #define preemptible()	(preempt_count() == 0 && !irqs_disabled())
 
 #ifdef CONFIG_PREEMPT
+/* 선점카운트를 1감소시켰을때 선점이 가능하고
+또 필요하다면 __preempt_schedule()을 호출함..*/
 #define preempt_enable() \
 do { \
 	barrier(); \
@@ -173,6 +177,7 @@ do { \
 		__preempt_schedule_notrace(); \
 } while (0)
 
+/*  선점가능하고 필요하다면 선점을 시도함..*/
 #define preempt_check_resched() \
 do { \
 	if (should_resched(0)) \

@@ -128,6 +128,7 @@ static inline void set_mems_allowed(nodemask_t nodemask)
 {
 	unsigned long flags;
 
+	/*current thread의 task lock을 잡음..*/
 	task_lock(current);
 	local_irq_save(flags);
 	write_seqcount_begin(&current->mems_allowed_seq);

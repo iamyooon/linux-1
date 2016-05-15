@@ -20,6 +20,7 @@
 #ifdef CONFIG_MMU
 static int early_ioremap_debug __initdata;
 
+/* early ioremap 디버그메세지 출력을 활성화하는 parameter 파싱함수 */
 static int __init early_ioremap_debug_setup(char *str)
 {
 	early_ioremap_debug = 1;
@@ -28,12 +29,15 @@ static int __init early_ioremap_debug_setup(char *str)
 }
 early_param("early_ioremap_debug", early_ioremap_debug_setup);
 
+/* ioremap이 사용가능할 때 1로 설정됨??? */
 static int after_paging_init __initdata;
 
+/* weak function */
 void __init __weak early_ioremap_shutdown(void)
 {
 }
 
+/* early ioremap을 reset시킨다는게 무슨 의미인지 모르겠음 */
 void __init early_ioremap_reset(void)
 {
 	early_ioremap_shutdown();
@@ -64,18 +68,29 @@ static void __iomem *prev_map[FIX_BTMAPS_SLOTS] __initdata;
 static unsigned long prev_size[FIX_BTMAPS_SLOTS] __initdata;
 static unsigned long slot_virt[FIX_BTMAPS_SLOTS] __initdata;
 
+/* slot_virt[] 초기화 */
 void __init early_ioremap_setup(void)
 {
 	int i;
 
+	/* 0 ~ 6 idx의 prev_map[]이 0이 아니라면 warn-on */
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++)
 		if (WARN_ON(prev_map[i]))
 			break;
 
+	/* 0 ~ 6 idx의 slot_virt[]를 초기화 */
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++)
+		/* 
+		 * fix addr -> 224, 192, 160, 128, 96, 64, 32 
+		 * virtaddr -> 
+		 */
 		slot_virt[i] = __fix_to_virt(FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*i);
 }
 
+/* 
+ * late_initcall이 호출될 시점에 prev_map[]이 설정되었는지 출력해줌. 
+ * 이 함수는 late_initcall로 등록됨.
+ */
 static int __init check_early_ioremap_leak(void)
 {
 	int count = 0;
@@ -106,6 +121,8 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	WARN_ON(system_state != SYSTEM_BOOTING);
 
 	slot = -1;
+
+	/* 빈 prev_map slot을 찾음. */
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++) {
 		if (!prev_map[i]) {
 			slot = i;
@@ -113,16 +130,20 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 		}
 	}
 
+	/* 빈 슬롯을 못찾았을 경우 메세지출력후 NULL 리턴 */
 	if (WARN(slot < 0, "%s(%08llx, %08lx) not found slot\n",
 		 __func__, (u64)phys_addr, size))
 		return NULL;
 
+	/* 매핑할 주소범위의 끝주소를 구함. */
 	/* Don't allow wraparound or zero size */
 	last_addr = phys_addr + size - 1;
 	if (WARN_ON(!size || last_addr < phys_addr))
 		return NULL;
 
+	/* save size to prev_size[slot] */
 	prev_size[slot] = size;
+
 	/*
 	 * Mappings have to be page-aligned
 	 */
@@ -140,7 +161,28 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	/*
 	 * Ok, go for it..
 	 */
+	/*
+	 ------------------------
+	| idx = 223 slot = 0     |
+	 ------------------------
+	| idx = 191 slot = 1     |
+	 ------------------------
+	| idx = 159 slot = 2     |
+	 ------------------------
+	| idx = 127 slot = 3     |
+	 ------------------------
+	| idx = 95 slot = 4      |
+	 ------------------------
+	| idx = 63 slot = 5      |
+	 ------------------------
+	| idx = 31 slot = 6      |
+	 ------------------------
+	*/
 	idx = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot;
+	/*
+	 * idx ~ idx+nrpages 만큼에 해당하는 fixmap address와
+	 * phys ~ phys+(idx*nr_pages) 만큼를 매핑한다..
+	 */
 	while (nrpages > 0) {
 		if (after_paging_init)
 			__late_set_fixmap(idx, phys_addr, prot);
@@ -153,6 +195,8 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	WARN(early_ioremap_debug, "%s(%08llx, %08lx) [%d] => %08lx + %08lx\n",
 	     __func__, (u64)phys_addr, size, slot, offset, slot_virt[slot]);
 
+	/* fixed address에 매핑된 physical addr의 시작가상주소를 prev_map의
+	 * 적절한 위치에 설정함.. */
 	prev_map[slot] = (void __iomem *)(offset + slot_virt[slot]);
 	return prev_map[slot];
 }

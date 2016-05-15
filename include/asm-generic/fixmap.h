@@ -17,7 +17,9 @@
 
 #include <linux/bug.h>
 
+/* fixmap address와 연관된 가상주소를 리턴해줌 */
 #define __fix_to_virt(x)	(FIXADDR_TOP - ((x) << PAGE_SHIFT))
+/* 가상주소를 연관된 fixmap address로 변환함 */
 #define __virt_to_fix(x)	((FIXADDR_TOP - ((x)&PAGE_MASK)) >> PAGE_SHIFT)
 
 #ifndef __ASSEMBLY__
