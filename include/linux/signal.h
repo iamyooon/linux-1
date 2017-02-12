@@ -220,8 +220,10 @@ static inline void init_sigpending(struct sigpending *sig)
 extern void flush_sigqueue(struct sigpending *queue);
 
 /* Test if 'sig' is valid signal. Use this instead of testing _NSIG directly */
+// sig번호가 64이상이 아니라면 정상적인 signal 번호임.
 static inline int valid_signal(unsigned long sig)
 {
+	// return 1 if sig nr <= 64
 	return sig <= _NSIG ? 1 : 0;
 }
 

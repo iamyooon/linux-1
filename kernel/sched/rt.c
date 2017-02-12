@@ -563,6 +563,7 @@ static int rt_se_boosted(struct sched_rt_entity *rt_se)
 		return !!rt_rq->rt_nr_boosted;
 
 	p = rt_task_of(rt_se);
+	// normal priority와 dynamic priority가 다른 경우는 boost-up된 경우
 	return p->prio != p->normal_prio;
 }
 
@@ -923,6 +924,7 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 		return rt_rq->highest_prio.curr;
 #endif
 
+	// rt task는 dynamic priority를 사용해서 자신이 enqueue될 queue를 찾음.
 	return rt_task_of(rt_se)->prio;
 }
 

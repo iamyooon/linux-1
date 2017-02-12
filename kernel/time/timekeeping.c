@@ -1442,7 +1442,7 @@ void __weak read_persistent_clock64(struct timespec64 *ts64)
  *
  *  XXX - Do be sure to remove it once all arches implement it.
  */
-void __weak read_boot_clock64(struct timespec64 *ts)
+void __weak read_boot_cock64(struct timespec64 *ts)
 {
 	ts->tv_sec = 0;
 	ts->tv_nsec = 0;

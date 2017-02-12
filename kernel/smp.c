@@ -37,14 +37,17 @@ static int
 hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
 	long cpu = (long)hcpu;
+	// @cpu의 per-cpu변수 cfd_data의 주소를 읽어옴.
 	struct call_function_data *cfd = &per_cpu(cfd_data, cpu);
 
 	switch (action) {
 	case CPU_UP_PREPARE:
 	case CPU_UP_PREPARE_FROZEN:
+		// clear cfd->cpumask
 		if (!zalloc_cpumask_var_node(&cfd->cpumask, GFP_KERNEL,
 				cpu_to_node(cpu)))
 			return notifier_from_errno(-ENOMEM);
+		// per-cpu변수로 할당함.
 		cfd->csd = alloc_percpu(struct call_single_data);
 		if (!cfd->csd) {
 			free_cpumask_var(cfd->cpumask);
@@ -91,9 +94,14 @@ void __init call_function_init(void)
 	void *cpu = (void *)(long)smp_processor_id();
 	int i;
 
+	// iterate all possible cpu
 	for_each_possible_cpu(i)
+		// lock less list의 head타입의 per-cpu변수 call_single_queue
+		// 를 사용하기 위해 초기화함.
 		init_llist_head(&per_cpu(call_single_queue, i));
 
+	// per-cpu 변수인 cfd_data의 csd가 가리킬 per-cpu 변수를 할당함.
+	// csd(call_single_data)는 call_single_data 구조체임.
 	hotplug_cfd(&hotplug_cfd_notifier, CPU_UP_PREPARE, cpu);
 	register_cpu_notifier(&hotplug_cfd_notifier);
 }

@@ -1568,6 +1568,9 @@ ret:
  *
  * Returns true if our parent ignored us and so we've switched to
  * self-reaping.
+ 자식태스크의 종료는 부모에게 알려야 함
+ stopped/continued status 변화는 do_notify_parent_cldstop()을 대신 쓴다
+ 부모가 자식의 종료는 무시하거나 self-reaping을 할 경우 참을 리턴함.
  */
 bool do_notify_parent(struct task_struct *tsk, int sig)
 {
@@ -1577,6 +1580,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 	bool autoreap = false;
 	cputime_t utime, stime;
 
+	// 자식태스크의 exit_signal이 -1이라면 문제가 있음.
+	// 여기 올 태스크라면 exit_signal이 -1이 아닌 무언가로 설정되어
+	// 있나보다..
 	BUG_ON(sig == -1);
 
  	/* do_notify_parent_cldstop should have been called instead.  */
@@ -1594,6 +1600,7 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 			sig = SIGCHLD;
 	}
 
+// siginfo구조체를 채움..
 	info.si_signo = sig;
 	info.si_errno = 0;
 	/*
@@ -1651,6 +1658,7 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 		if (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN)
 			sig = 0;
 	}
+	// sig번호가 > 0, <=64 이상이 아니라면 정상적인 signal 번호임.
 	if (valid_signal(sig) && sig)
 		__group_send_sig_info(sig, &info, tsk->parent);
 	__wake_up_parent(tsk, tsk->parent);

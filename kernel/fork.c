@@ -976,13 +976,18 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	 *
 	 * We need to steal a active VM for that..
 	 */
+	// mm 필드가 NULL이라면 커널스레드임.
+	// 커널스레드는 직전 태스크의 mm을 사용함.
 	oldmm = current->mm;
 	if (!oldmm)
 		return 0;
 
 	/* initialize the new vmacache entries */
+	// 최근에 사용한 vm_area_struct 구조체를 가지고 있는 vmacache entry 초기화
 	vmacache_flush(tsk);
 
+	// CLONE_VM 플래그가 설정되어있다면 mm_users를 증가시켜서
+	// 공유사용자의 횟수를 증가시킨다.
 	if (clone_flags & CLONE_VM) {
 		atomic_inc(&oldmm->mm_users);
 		mm = oldmm;
@@ -990,6 +995,8 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	}
 
 	retval = -ENOMEM;
+	// mm_struct 구조체 할당, current 태스크의 것으로 내용 복사
+	// current 태스크의 vm_area_struct 구조체 list를 모두 복사해옴.
 	mm = dup_mm(tsk);
 	if (!mm)
 		goto fail_nomem;
@@ -1515,8 +1522,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	/* global pid를 리턴함. root namespace인 init ns에서 유일한 값.. */
 	p->pid = pid_nr(pid);
 	if (clone_flags & CLONE_THREAD) {
+		// exit_signal이 음수라면 그룹리더가 아닌 스레드임.
 		p->exit_signal = -1;
+		// 리더스레드를 가리킴.
 		p->group_leader = current->group_leader;
+		// tgid를 동일하게 설정..
 		p->tgid = current->tgid;
 	/* thread생성하는 copy_process가 아니라면.. */
 	} else {
@@ -1524,7 +1534,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 			p->exit_signal = current->group_leader->exit_signal;
 		else
 			p->exit_signal = (clone_flags & CSIGNAL);
-		/* 당연한 얘기지만 쓰레드그룹의 leader를 이번에 새롭게 생성한 태스크로 지정함..*/
+		/* 당연한 얘기지만 쓰레드그룹의 leader를 이번에 새롭게 생성한 
+		// 태스크로 지정함..*/
 		p->group_leader = p;
 		/* 쓰레드그룹의 id는 당연히 리더의 id로..*/
 		p->tgid = p->pid;

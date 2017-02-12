@@ -482,6 +482,8 @@ static struct task_struct *find_child_reaper(struct task_struct *father)
  * 2. give it to the first ancestor process which prctl'd itself as a
  *    child_subreaper for its children (like a service manager)
  * 3. give it to the init process (PID 1) in our pid namespace
+ father 태스크가 죽으면, 자식들의 부모를 재설정해주고 아래를 시도한다.
+ 1. 
  */
 static struct task_struct *find_new_reaper(struct task_struct *father,
 					   struct task_struct *child_reaper)
@@ -556,7 +558,9 @@ static void forget_original_parent(struct task_struct *father,
 		exit_ptrace(father, dead);
 
 	/* Can drop and reacquire tasklist_lock */
+	// father가 속한 pid namespace의 reaper를 찾아 리턴
 	reaper = find_child_reaper(father);
+	// 자식이 없는 father라면 아무것도 안하고 리턴..
 	if (list_empty(&father->children))
 		return;
 
@@ -1099,6 +1103,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
 	if (!retval)
 		retval = pid;
 
+	// #define EXIT_TRACE	(EXIT_ZOMBIE | EXIT_DEAD)
 	if (state == EXIT_TRACE) {
 		write_lock_irq(&tasklist_lock);
 		/* We dropped tasklist, ptracer could die and untrace */

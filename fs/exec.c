@@ -1027,6 +1027,7 @@ static int de_thread(struct task_struct *tsk)
 	 * At this point all other threads have exited, all we have to
 	 * do is to wait for the thread group leader to become inactive,
 	 * and to assume its PID:
+	 다른 모든 쓰레드가 종료되었다면, 
 	 */
 	if (!thread_group_leader(tsk)) {
 		struct task_struct *leader = tsk->group_leader;

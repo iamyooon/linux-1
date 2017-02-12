@@ -689,13 +689,17 @@ int tg_nop(struct task_group *tg, void *data)
 }
 #endif
 
+// 0-39로 범위로 변환된 static priority를 이용해서 미리 계산된
+// weight, inv weight를 구해서 태스크의 lw에 설정함.
 static void set_load_weight(struct task_struct *p)
 {
+	// static priority를 0 - 39로 변환함.
 	int prio = p->static_prio - MAX_RT_PRIO;
 	struct load_weight *load = &p->se.load;
 
 	/*
 	 * SCHED_IDLE tasks get minimal weight:
+	 * idle 정책은 static priority상관없이 최소 lw지정.
 	 */
 	if (idle_policy(p->policy)) {
 		load->weight = scale_load(WEIGHT_IDLEPRIO);
@@ -703,6 +707,8 @@ static void set_load_weight(struct task_struct *p)
 		return;
 	}
 
+	// 0-39로 범위로 변환된 static priority를 이용해서 미리 계산된
+	// weight, inv weight를 구해서 태스크의 lw에 설정함.
 	load->weight = scale_load(sched_prio_to_weight[prio]);
 	load->inv_weight = sched_prio_to_wmult[prio];
 }
@@ -837,7 +843,13 @@ static inline int __normal_prio(struct task_struct *p)
  * boosted by interactivity modifiers. Changes upon fork,
  * setprio syscalls, and whenever the interactivity
  * estimator recalculates.
+ expected normal priority를 계산한다. 예를 들어 RT-inheritance를 고려하지 않은.
+ 아마 interactivity modified에 의해 부스팅된다.
+ fork, setprio,
  */
+// dl    -> -1
+// rt    -> 99 - rt_priority
+// other -> static_prio
 static inline int normal_prio(struct task_struct *p)
 {
 	int prio;
@@ -858,17 +870,34 @@ static inline int normal_prio(struct task_struct *p)
  * be boosted by RT tasks, or might be boosted by
  * interactivity modifiers. Will be RT if the task got
  * RT-boosted. If not then it returns p->normal_prio.
+ current priority를 계산한다.  예를 들어 스케쥴링정책을 고려한 priority
+ 이 값은 아래의 경우 boost된다
+  - RT task
+  - interactivity modifiers
+ 태스크의 우선순위가 부스팅되면 RT가 된다. 그렇지 않으면 normal priority를
+ 리턴한다.
  */
+// set p->normal_prio
+// return below
+// - normal task      -> p->static_prio
+// - normal task
+//   with rt priority -> p->prio
+// - rt task	    -> 99 - rt_priority
+// - dl task          -> -1
 static int effective_prio(struct task_struct *p)
 {
-	/* CFS 태스크의 경우, task @p의 static_prio를 리턴함. */
+	// dl    -> -1
+	// rt    -> 99 - rt_priority
+	// other -> static_prio
 	p->normal_prio = normal_prio(p);
 	/*
 	 * If we are RT tasks or we were boosted to RT priority,
 	 * keep the priority unchanged. Otherwise, update priority
 	 * to the normal priority:
-	 */
-	/* normal task급의 priority를 가지고 있다면..  */
+	 RT task이거나 RT task급의 priority를 가진 태스크라면 priority를 바꾸지 않는다.
+	 그렇지 않으면 priority를 normal priority로 바꾼다.
+	  */
+	/* normal task급의 priority를 가지고 있다면.. */
 	if (!rt_prio(p->prio))
 		return p->normal_prio;
 	/* rt task급의 priority를 가지고 있다면 */
@@ -2259,11 +2288,19 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 
 	/*
 	 * Make sure we do not leak PI boosting priority to the child.
+	 boosting된 dynamic priority가 상속되지 않게 prio = normal_prio
+	 static_prio, normal_prio는 상속된다는 의미..
 	 */
 	p->prio = current->normal_prio;
 
 	/*
 	 * Revert to default priority/policy on fork if requested.
+	 priority reset을 요청하면 
+	 	- normal
+			- prio = normal_prio = static_prio
+		- rt
+			- prio = normal_prio = static_prio = 120
+			- rt_priority = 0
 	 */
 	if (unlikely(p->sched_reset_on_fork)) {
 		if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
@@ -2283,6 +2320,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_reset_on_fork = 0;
 	}
 
+	// fork시에는 priority를 기준으로 스케쥴링 정책을 결정함.
 	if (dl_prio(p->prio)) {
 		put_cpu();
 		return -EAGAIN;
@@ -3530,7 +3568,11 @@ void set_user_nice(struct task_struct *p, long nice)
 	 * allow the 'normal' nice value to be set - but as expected
 	 * it wont have any effect on scheduling until the task is
 	 * SCHED_DEADLINE, SCHED_FIFO or SCHED_RR:
+	 RT priority는 sched_setscheduler()를 통해 설정된다.
+	 여전히 normal nice값은 설정가능하지만 태스크가 dl, fifo, rr이라면
+	 스케쥴링에 영향을 주지 않는다.
 	 */
+	// rt, dl이라면 nice값을 static priority에 설정하고 바로종료.
 	if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
 		p->static_prio = NICE_TO_PRIO(nice);
 		goto out_unlock;
@@ -3539,9 +3581,20 @@ void set_user_nice(struct task_struct *p, long nice)
 	if (queued)
 		dequeue_task(rq, p, DEQUEUE_SAVE);
 
+	// rt, dl이 아니라면 nice값을 static priority에 설정하고 바료종료안함
 	p->static_prio = NICE_TO_PRIO(nice);
+	// 바뀐 static priority를 이용해서 load weight 갱신
+	// 0-39로 범위로 변환된 static priority를 이용해서 미리 계산된
+	// weight, inv weight를 구해서 태스크의 lw에 설정함.
 	set_load_weight(p);
 	old_prio = p->prio;
+	// set p->normal_prio
+	// return below
+	// - normal task      -> p->static_prio
+	// - normal task
+	//   with rt priority -> p->prio
+	// - rt task	    -> 99 - rt_priority
+	// - dl task          -> -1
 	p->prio = effective_prio(p);
 	delta = p->prio - old_prio;
 

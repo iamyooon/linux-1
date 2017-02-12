@@ -1006,6 +1006,8 @@ static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 	 * After ->cpu is set up to a new value, task_rq_lock(p, ...) can be
 	 * successfuly executed on another CPU. We must ensure that updates of
 	 * per-task data have been completed by this moment.
+	 ->cpu를 새값으로 설정한 후, task_rq_clock(p,...) 함수호출은 성공적으로
+	 다른 cpu에서 실행될 수 있다. per-task 데이터를 갱신하는것을 보장해야 한다.
 	 */
 	smp_wmb();
 	/* 태스크 @p의 thread_info의 cpu값을 @cpu로 설정.. */
