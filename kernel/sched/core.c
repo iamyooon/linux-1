@@ -95,7 +95,7 @@ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
 static void update_rq_clock_task(struct rq *rq, s64 delta);
 
-void update_rq_clock(struct rq *rq)
+oid update_rq_clock(struct rq *rq)
 {
 	s64 delta;
 
@@ -108,6 +108,7 @@ void update_rq_clock(struct rq *rq)
 	if (delta < 0)
 		return;
 	rq->clock += delta;
+	// rq->clock_task += delta
 	update_rq_clock_task(rq, delta);
 }
 
@@ -709,6 +710,7 @@ static void set_load_weight(struct task_struct *p)
 
 static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	// rq->clock, rq->task_clock을 갱신해줌.
 	update_rq_clock(rq);
 	if (!(flags & ENQUEUE_RESTORE))
 		sched_info_queued(rq, p);
@@ -717,14 +719,17 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 
 static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	// rq->clock, rq->task_clock을 갱신해줌.
 	update_rq_clock(rq);
 	if (!(flags & DEQUEUE_SAVE))
 		sched_info_dequeued(rq, p);
+	//
 	p->sched_class->dequeue_task(rq, p, flags);
 }
 
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	// 태스크가 uninterruptible 상태이고 PF_FROZEN되진 않았으며noload 상태도 아닌경우
 	if (task_contributes_to_load(p))
 		rq->nr_uninterruptible--;
 
@@ -785,6 +790,10 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 	}
 #endif
 
+	// 지난 갱신 이후로 흐른 시간을clock_task에 더해줌.
+	// TBD rq->clock과 다른점은 멀까?
+	// 태스크는 자신이 최근에 실행되었던 시간을 exec_start필드에 갱신하고 있음
+	// 이 값은 스케쥴링 될때도 갱신되는데, 런큐의 clock_task 필드로 갱신된다.
 	rq->clock_task += delta;
 
 #if defined(CONFIG_IRQ_TIME_ACCOUNTING) || defined(CONFIG_PARAVIRT_TIME_ACCOUNTING)
@@ -1038,38 +1047,63 @@ static int migration_cpu_stop(void *data)
  * sched_class::set_cpus_allowed must do the below, but is not required to
  * actually call this function.
  */
+// 1.태스크가 사용할 수 있는 cpu list인 cpus_allowed 필드를 갱신
+// 2.태스크의 cpus_allowed 필드
 void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask)
 {
 	cpumask_copy(&p->cpus_allowed, new_mask);
 	p->nr_cpus_allowed = cpumask_weight(new_mask);
 }
 
+// 1.태스크가 사용할 수 있는 cpu에 대한 정보를 나타내는
+// cpus_allowed, nr_cpus_allowed 필드를 갱신한다.
+// 2.태스크가 만약 enqueue되어 있는 상태라면 태스크를 잠시 dequeue했다가 
+// 1번을 수행하고 다시 enqueue한다.
+// 3. current 태스크라면 current를 초기화했다가 1번을 수행한 뒤 다시 current로 설정한다.
 void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 {
+	// p's thread_info->cpu
 	struct rq *rq = task_rq(p);
 	bool queued, running;
 
 	lockdep_assert_held(&p->pi_lock);
 
+	// TASK_ON_RQ_QUEUED? 
 	queued = task_on_rq_queued(p);
+	// 태스크가 current 라면..
 	running = task_current(rq, p);
 
+	// 태스크가 migrate 중이라면..
 	if (queued) {
 		/*
 		 * Because __kthread_bind() calls this on blocked tasks without
 		 * holding rq->lock.
 		 */
 		lockdep_assert_held(&rq->lock);
+		// 태스크를 잠시 런큐에서 빼낸다.
+		// TBD DEQUEUE_SAVE를 하면 달라지는것..
 		dequeue_task(rq, p, DEQUEUE_SAVE);
 	}
+	// 태스크가 current 라면..
 	if (running)
+		// 인자로 전달된 prev 태스크의 스케줄링 엔티티가 속한 계층구조를
+		// bottom-up 방식으로 순회하면서 엔티티가 enqueue될 CFS 런큐의 curr 필드를 
+		// 초기화하고 CFS 런큐의 연관된 엔티티가 아직 dequeue 안된 상태라면 아래를 수행한다
+		// 1.current 태스크, CFS 런큐의 런타임정보를 갱신함.
+		// 2.current 태스크를 레드블랙트리에 다시 enqueu함. 
 		put_prev_task(rq, p);
 
+	// 1.태스크가 사용할 수 있는 cpu list인 cpus_allowed 필드를 갱신 
+	// 2.태스크가 사용할 수 있는 cpu 개수인 nr_cpus_allowed 필드를 갱신
 	p->sched_class->set_cpus_allowed(p, new_mask);
 
+	// 태스크가 current 라면..
 	if (running)
+		// 런큐의 current se의 계층구조를 순회하며 각 cfs 런큐의 current se로 설정한다.
 		p->sched_class->set_curr_task(rq);
+	// enqueue되어 있던 태스크였다면
 	if (queued)
+		// 다시 enqueue한다..
 		enqueue_task(rq, p, ENQUEUE_RESTORE);
 }
 
@@ -1435,8 +1469,13 @@ EXPORT_SYMBOL_GPL(kick_process);
 /*
  * ->cpus_allowed is protected by both rq->lock and p->pi_lock
  */
+// 태스크가 사용할 수 있는 cpu list인 cpus_allowed에 설정된 cpu중에
+// online && active 상태인 cpu를 선택한다.
+// 만약 조건에 맞는 cpu가 없다면 possible cpu중에서 맞는 조건의 cpu를 찾는다.
+// 이 과정에서 태스크의 cpus_allowed 필드가 재설정된다.
 static int select_fallback_rq(int cpu, struct task_struct *p)
 {
+	// -1
 	int nid = cpu_to_node(cpu);
 	const struct cpumask *nodemask = NULL;
 	enum { cpuset, possible, fail } state = cpuset;
@@ -1461,13 +1500,19 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 		}
 	}
 
+	// 무한 반복..
 	for (;;) {
 		/* Any allowed, online CPU? */
+		// 태스크가 사용할 수 있는 cpu list인 cpus_allowed에
+		// 설정된 cpu를 순회한다.
 		for_each_cpu(dest_cpu, tsk_cpus_allowed(p)) {
+			// 선택된 cpu가 online이 아니라면 pass
 			if (!cpu_online(dest_cpu))
 				continue;
+			// active cpu가 아니라면 pass
 			if (!cpu_active(dest_cpu))
 				continue;
+			// online이고 actvie한 cpu가 있다면 사용한다.
 			goto out;
 		}
 
@@ -1481,6 +1526,11 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 			}
 			/* fall-through */
 		case possible:
+			// 1.태스크가 사용할 수 있는 cpu에 대한 정보를 나타내는
+			// cpus_allowed, nr_cpus_allowed 필드를 cpu_possible_mask를 이용해서 갱신한다.
+			// 2.태스크가 만약 enqueue되어 있는 상태라면 태스크를 잠시 dequeue했다가 
+			// 1번을 수행하고 다시 enqueue한다.
+			// 3. current 태스크라면 current를 초기화했다가 1번을 수행한 뒤 다시 current로 설정한다.
 			do_set_cpus_allowed(p, cpu_possible_mask);
 			state = fail;
 			break;
@@ -1492,6 +1542,8 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	}
 
 out:
+	// state의 기본값은 cpuset이고.. 
+	// 위의 switch case문을 수행하면 possible, fail중 하나로 무조건 변경됨.
 	if (state != cpuset) {
 		/*
 		 * Don't tell them about moving exiting tasks or
@@ -1504,6 +1556,7 @@ out:
 		}
 	}
 
+	// 태스크가 사용가능한 cpu중 하나로 선택된 cpu를 선택해서 리턴한다.
 	return dest_cpu;
 }
 
@@ -1515,6 +1568,9 @@ int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags)
 {
 	lockdep_assert_held(&p->pi_lock);
 
+	// 태스크가 실행가능한 cpu 개수를 나타내는 필드 nr_cpus_allowed가 1보다 크다면
+	// 다른 cpu에서도 실행할 수 있는것임. 태스크가 속한 스케줄링 클래스에서 
+	// 구현한 select_task_rq()를 통해 cpu를 선택한다.
 	if (p->nr_cpus_allowed > 1)
 		cpu = p->sched_class->select_task_rq(p, cpu, sd_flags, wake_flags);
 
@@ -1528,8 +1584,13 @@ int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags)
 	 * [ this allows ->select_task() to simply return task_cpu(p) and
 	 *   not worry about this generic constraint ]
 	 */
+	// 그럴리 없지만, 새롭게 고른 CPU를 태스크가 사용할 수 없거나
+	// online 상태의 cpu가 아니라서 역시 사용할 수 없다면..
 	if (unlikely(!cpumask_test_cpu(cpu, tsk_cpus_allowed(p)) ||
 		     !cpu_online(cpu)))
+		// 태스크가 사용할 수 있는 cpu list인 cpus_allowed에 설정된 cpu중에
+		// online && active 상태인 cpu를 선택한다.
+		// 만약 조건에 맞는 cpu가 없다면 possible cpu중에서 맞는 조건의 cpu를 찾는다.
 		cpu = select_fallback_rq(task_cpu(p), p);
 
 	return cpu;
@@ -1604,10 +1665,17 @@ static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_fl
 /*
  * Mark the task runnable and perform wakeup-preemption.
  */
+// 1.태스크가 current 태스크를 선점할 수 있는지 체크한다(wakeup preemption)
+//   가능하다면 current 태스크에 TIF_NEED_RESCHED 플래그를 설정한다.
+// 2.태스크가 실행가능한 상태임을 설정한다.
 static void
 ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
+	// 태스크 @p가 current 태스크를 wakeup preemption 할 수 있는지 체크한다.
+	// preemption이 가능하다면 current 태스크에  TIF_NEED_RESCHED 플래그를 설정해서
+	// 추후에 스케줄링이 진행되도록 한다.
 	check_preempt_curr(rq, p, wake_flags);
+	// 태스크가 실행가능한 상태임을 설정한다.
 	p->state = TASK_RUNNING;
 	trace_sched_wakeup(p);
 
@@ -1647,6 +1715,9 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags)
 #endif
 
 	ttwu_activate(rq, p, ENQUEUE_WAKEUP | ENQUEUE_WAKING);
+	// 1.태스크가 current 태스크를 선점할 수 있는지 체크한다(wakeup preemption)
+	//   가능하다면 current 태스크에 TIF_NEED_RESCHED 플래그를 설정한다.
+	// 2.태스크가 실행가능한 상태임을 설정한다.
 	ttwu_do_wakeup(rq, p, wake_flags);
 }
 
@@ -1661,9 +1732,12 @@ static int ttwu_remote(struct task_struct *p, int wake_flags)
 	struct rq *rq;
 	int ret = 0;
 
+	// 태스크가 가장 최근에 실행되었던 CPU의 런큐
 	rq = __task_rq_lock(p);
+	// p->on_rq에 TASK_ON_RQ_QUEUED가 설정되어 있다면
 	if (task_on_rq_queued(p)) {
 		/* check_preempt_curr() may use rq clock */
+		// clock_task, clock 업데이트
 		update_rq_clock(rq);
 		ttwu_do_wakeup(rq, p, wake_flags);
 		ret = 1;
@@ -1901,6 +1975,9 @@ static void ttwu_queue(struct task_struct *p, int cpu)
  *
  * Return: %true if @p was woken up, %false if it was already running.
  * or @state didn't match @p's state.
+ return true, 태스크가 깨어나는데 성공했을 경우
+ return false, 태스크가 이미 깨어있는 경우
+               혹은 태스크의 현재 상태가 인자로 전달된 state와 다를 경우
  */
 static int
 try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
@@ -1916,14 +1993,19 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	smp_mb__before_spinlock();
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
+	// 태스크의 현재상태와 인자로 전달된 상태가 겹치지 않는다면
+	// wakeup 시키지 않고 리턴함.
 	if (!(p->state & state))
 		goto out;
 
 	trace_sched_waking(p);
 
 	success = 1; /* we're going to change ->state */
+	// 태스크가 최근에 실행했던 cpu id
 	cpu = task_cpu(p);
 
+	// 스케줄링에 의해 대기하다가 다시 실행되는 태스크라면 on_rq = 0
+	// fully deschedule되지 못한 태스크라면
 	if (p->on_rq && ttwu_remote(p, wake_flags))
 		goto stat;
 
@@ -1959,6 +2041,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	smp_cond_acquire(!p->on_cpu);
 
 	p->sched_contributes_to_load = !!task_contributes_to_load(p);
+	// task is about to wake up
 	p->state = TASK_WAKING;
 
 	if (p->sched_class->task_waking)
@@ -3063,6 +3146,10 @@ static inline void schedule_debug(struct task_struct *prev)
 
 /*
  * Pick up the highest-prio task:
+ 우선순위가 제일 태스크를 선택한다.
+ 스케줄러 전체적인 관점에서는 클래스 선택 후 우선순위가 제일 높은 태스크..
+ -> (실행할 태스크가 있는)우선순위가 제일 높은 클래스
+ ->-> 우선순위가 제일 높은 태스크
  */
 static inline struct task_struct *
 pick_next_task(struct rq *rq, struct task_struct *prev)
@@ -3073,14 +3160,20 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
 	/*
 	 * Optimization: we know that if all tasks are in
 	 * the fair class we can call that function directly:
+	 만약 모든 태스크가 fair class에 속한다면(rq->nr_running == rq->cfs.h_nr_running)
+	 다른 클래스의 태스크는 없으므로 바로 pick_next_task() 필요.
+	 TBD: 그런데 prev도 fair여야 한다는 조건은 왜필요한걸까?
+	 38033c37faab850ed5d33bb675c4de6c66be84d8
 	 */
 	if (likely(prev->sched_class == class &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
 		p = fair_sched_class.pick_next_task(rq, prev);
+		// fair class의 태스크중에서 pick할게 없다면 모든 클래스를 순회할 필요...
 		if (unlikely(p == RETRY_TASK))
 			goto again;
 
 		/* assumes fair_sched_class->next == idle_sched_class */
+		// is there any task runnable, pick task from idle(idle thread)
 		if (unlikely(!p))
 			p = idle_sched_class.pick_next_task(rq, prev);
 
@@ -3088,6 +3181,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
 	}
 
 again:
+// 
 	for_each_class(class) {
 		p = class->pick_next_task(rq, prev);
 		if (p) {

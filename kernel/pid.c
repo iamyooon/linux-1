@@ -48,7 +48,6 @@ struct pid init_struct_pid = INIT_STRUCT_PID;
 int pid_max = PID_MAX_DEFAULT;
 
 #define RESERVED_PIDS		300
-
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
 
@@ -195,6 +194,8 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 				if (offset >= BITS_PER_PAGE)
 					break;
 				pid = mk_pid(pid_ns, map, offset);
+				// pid_max값을 넘었으면 더이상 할당안해야하는거 아냐?
+				// 다시 0번부터 시작하는건가??
 				if (pid >= pid_max)
 					break;
 			}

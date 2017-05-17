@@ -245,6 +245,7 @@ extern char ___assert_task_state[1 - 2*!!(
 #define task_is_stopped(task)	((task->state & __TASK_STOPPED) != 0)
 #define task_is_stopped_or_traced(task)	\
 			((task->state & (__TASK_STOPPED | __TASK_TRACED)) != 0)
+// 태스크가 uninterruptible 상태이고 PF_FROZEN되진 않았으며noload 상태도 아닌경우
 #define task_contributes_to_load(task)	\
 				((task->state & TASK_UNINTERRUPTIBLE) != 0 && \
 				 (task->flags & PF_FROZEN) == 0 && \
@@ -1258,7 +1259,7 @@ struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
 	struct list_head	group_node;
-	unsigned int		on_rq;
+	unsigned int		on_rq;		// enqueue_entity() 할 때 1, dequeue_entity할 때 0
 
 	u64			exec_start;
 	u64			sum_exec_runtime;

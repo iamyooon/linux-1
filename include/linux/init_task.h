@@ -157,6 +157,7 @@ extern struct task_group root_task_group;
 # define INIT_VTIME(tsk)
 #endif
 
+// 원래 swap도 담당해서 이름이 붙여짐...
 #define INIT_TASK_COMM "swapper"
 
 #ifdef CONFIG_RT_MUTEXES

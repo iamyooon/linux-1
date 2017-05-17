@@ -1242,6 +1242,11 @@ struct sched_class {
 #endif
 };
 
+// 인자로 전달된 prev 태스크의 스케줄링 엔티티가 속한 계층구조를
+// bottom-up 방식으로 순회하면서 엔티티가 enqueue될 CFS 런큐의 curr 필드를 
+// 초기화하고 CFS 런큐의 연관된 엔티티가 아직 dequeue 안된 상태라면 아래를 수행한다
+// 1.current 태스크, CFS 런큐의 런타임정보를 갱신함.
+// 2.current 태스크를 레드블랙트리에 다시 enqueu함. 
 static inline void put_prev_task(struct rq *rq, struct task_struct *prev)
 {
 	prev->sched_class->put_prev_task(rq, prev);
@@ -1398,6 +1403,7 @@ static inline u64 sched_avg_period(void)
  */
 static inline int hrtick_enabled(struct rq *rq)
 {
+	// feature.h에서 false로 정의되어 있음.
 	if (!sched_feat(HRTICK))
 		return 0;
 	if (!cpu_active(cpu_of(rq)))
@@ -1459,6 +1465,7 @@ static inline struct rq *__task_rq_lock(struct task_struct *p)
 	lockdep_assert_held(&p->pi_lock);
 
 	for (;;) {
+		// 태스크가 가장 최근에 실행된 CPU의 런큐
 		rq = task_rq(p);
 		raw_spin_lock(&rq->lock);
 		if (likely(rq == task_rq(p) && !task_on_rq_migrating(p))) {

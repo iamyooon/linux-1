@@ -71,6 +71,7 @@ unsigned int normalized_sysctl_sched_min_granularity = 750000ULL;
 
 /*
  * is kept at sysctl_sched_latency / sysctl_sched_min_granularity
+ // 6ms / 0.75ms
  */
 static unsigned int sched_nr_latency = 8;
 
@@ -186,6 +187,7 @@ static void __update_inv_weight(struct load_weight *lw)
 {
 	unsigned long w;
 
+	// inv_weight > 0
 	if (likely(lw->inv_weight))
 		return;
 
@@ -203,29 +205,43 @@ static void __update_inv_weight(struct load_weight *lw)
  * delta_exec * weight / lw.weight
  *   OR
  * (delta_exec * (weight * lw->inv_weight)) >> WMULT_SHIFT
+ * 기준weight 대비 lw.weight이 클수록 delta가 작아질것임. 
+ * 따라서 lw.wieght이 클수록vruntime 증가가 천천히 될것임.
  *
  * Either weight := NICE_0_LOAD and lw \e prio_to_wmult[], in which case
  * we're guaranteed shift stays positive because inv_weight is guaranteed to
  * fit 32 bits, and NICE_0_LOAD gives another 10 bits; therefore shift >= 22.
+ weight가 NICE_0_LOAD이고 lw \e prio_to_wmult일때, 
+ 이경우 shift가 여전히 양수라는것을 보장할 수 있다. 왜냐하면
+ inv_weight가 32bits에 fit하는게 보장되기 때문이다.
+ 그리고 NICE_0_LOAD는 또다른 10비트를 준다. 그리하여 shift는 22보다 작지않다.
  *
  * Or, weight =< lw.weight (because lw.weight is the runqueue weight), thus
  * weight/lw.weight <= 1, and therefore our shift will also be positive.
  */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
+	// fact = weight
 	u64 fact = scale_load_down(weight);
+	// shift = 32
 	int shift = WMULT_SHIFT;
 
 	__update_inv_weight(lw);
 
+	// fact가 꽤 큰 값이라면 shift값과 같이 미리 값을 2배수로 나눠서 값을 작게만듬..
+	// fact가 32비트보다 큰 값이라면..
 	if (unlikely(fact >> 32)) {
+		// fact가 32비트보다 큰 값이라면..
 		while (fact >> 32) {
+			// fact /= 2
 			fact >>= 1;
 			shift--;
 		}
 	}
 
 	/* hint to use a 32x32->64 mul */
+	// fact / lw.weight
+	// == fact* inv_weight >> WMULT_SHIFT 
 	fact = (u64)(u32)fact * lw->inv_weight;
 
 	while (fact >> 32) {
@@ -233,6 +249,7 @@ static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight
 		shift--;
 	}
 
+	// delta_exec * fact >> shift
 	return mul_u64_u32_shr(delta_exec, fact, shift);
 }
 
@@ -283,6 +300,8 @@ static inline struct cfs_rq *group_cfs_rq(struct sched_entity *grp)
 	return grp->my_q;
 }
 
+// cfs_rq의 런큐의 leaft_cfs_rq_list에 
+// 런큐의 leaf_cfs_rq_list에 태스크가 1개인 
 static inline void list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	if (!cfs_rq->on_list) {
@@ -327,6 +346,7 @@ is_same_group(struct sched_entity *se, struct sched_entity *pse)
 	return NULL;
 }
 
+// get parent's se
 static inline struct sched_entity *parent_entity(struct sched_entity *se)
 {
 	return se->parent;
@@ -439,6 +459,7 @@ static inline u64 max_vruntime(u64 max_vruntime, u64 vruntime)
 	return max_vruntime;
 }
 
+// 둘 중 작은 값을 리턴함.
 static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 {
 	s64 delta = (s64)(vruntime - min_vruntime);
@@ -448,24 +469,37 @@ static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 	return min_vruntime;
 }
 
+// A vruntime이 B보다 작다면..
 static inline int entity_before(struct sched_entity *a,
 				struct sched_entity *b)
 {
 	return (s64)(a->vruntime - b->vruntime) < 0;
 }
 
+// CFS 런큐의 min_vruntime을 아래 값 중 하나로 갱신된다.
+// 1. current 엔티티의 vruntime
+// 2. leftmost 엔티티의 vruntime
+// 3. CFS 런큐의 기존 min_vruntime
 static void update_min_vruntime(struct cfs_rq *cfs_rq)
 {
 	u64 vruntime = cfs_rq->min_vruntime;
 
+	// CFS 런큐의 current 엔티티가 설정되어 있다면
+	// CFS 런큐의 min_vruntime 대신 current 태스크의 vruntime을 사용함.
 	if (cfs_rq->curr)
 		vruntime = cfs_rq->curr->vruntime;
 
+	// CFS 런큐에서 가장 작은 vruntime을 가지고 있을 leftmost 엔티티가 
+	// 런큐에 존재한다면 min_vruntime으로 사용할 vruntime중 하나로 고려한다.
 	if (cfs_rq->rb_leftmost) {
 		struct sched_entity *se = rb_entry(cfs_rq->rb_leftmost,
 						   struct sched_entity,
 						   run_node);
 
+		// CFS 런큐에 current 엔티티가 존재하지 않으면 
+		// CFS 런큐의 min_vruntime 대신 leftmost 엔티티의 vruntime을 쓰고
+		// 존재한다면 current 엔티티의 vruntime과 leftmost 엔티티의 vruntime 
+		// 둘 중 작은 vruntime을 쓴다.
 		if (!cfs_rq->curr)
 			vruntime = se->vruntime;
 		else
@@ -473,6 +507,8 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 	}
 
 	/* ensure we never gain time by being placed backwards. */
+	// 둘 중 큰 vruntime을 사용하도록 해서 기존의 CFS 런큐의 min_vruntime이 
+	// 작아지는 상황을 막는다.
 	cfs_rq->min_vruntime = max_vruntime(cfs_rq->min_vruntime, vruntime);
 #ifndef CONFIG_64BIT
 	smp_wmb();
@@ -485,6 +521,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
  */
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// 레드블랙트리의 root node
 	struct rb_node **link = &cfs_rq->tasks_timeline.rb_node;
 	struct rb_node *parent = NULL;
 	struct sched_entity *entry;
@@ -493,6 +530,9 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	/*
 	 * Find the right place in the rbtree:
 	 */
+	// 레드블랙 트리의 root node에서부터 시작해서
+	// 엔티티의 값이 해당 노드보다 크다면 오른쪽, 작다면 왼쪽으로
+	// 계속 탐색해서 끝까지 간다.
 	while (*link) {
 		parent = *link;
 		entry = rb_entry(parent, struct sched_entity, run_node);
@@ -500,10 +540,13 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		 * We dont care about collisions. Nodes with
 		 * the same key stay together.
 		 */
+		// se의 vruntime이 entry보다 작다면 왼쪽 노드 선택
 		if (entity_before(se, entry)) {
 			link = &parent->rb_left;
+		// se의 vruntime이 entry보다 크다면 오른쪽 노드 선택
 		} else {
 			link = &parent->rb_right;
+			// leftmost가 절대아님..
 			leftmost = 0;
 		}
 	}
@@ -512,15 +555,22 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	 * Maintain a cache of leftmost tree entries (it is frequently
 	 * used):
 	 */
+	// 새로 추가할 엔티티가 leftmost라면 캐싱한다.
 	if (leftmost)
 		cfs_rq->rb_leftmost = &se->run_node;
 
+	// 엔티티를 적절한 색깔을 설정한뒤 레드블랙트리에 추가한다.
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
 }
 
+// 1.인자로 전달한 스케줄링 엔티티 se가 leftmost 엔티티였다면
+// CFS 런큐의 leftmost 엔티티를 다음으로 vruntime이 작은 엔티티로 설정한다.
+// 2.레드블랙 트리에서 엔티티 se를 제거한다.
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// dequeu하려던 엔티티가 leftmost였다면
+	// 그 다음 엔티티를 leftmost로 설정한다.
 	if (cfs_rq->rb_leftmost == &se->run_node) {
 		struct rb_node *next_node;
 
@@ -528,9 +578,11 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		cfs_rq->rb_leftmost = next_node;
 	}
 
+	// 레드블랙트리에서 엔티티를 제거한다.
 	rb_erase(&se->run_node, &cfs_rq->tasks_timeline);
 }
 
+// get leftmost entity, if it is non-exist, return NULL
 struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *left = cfs_rq->rb_leftmost;
@@ -595,9 +647,15 @@ int sched_proc_update_handler(struct ctl_table *table, int write,
  */
 static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 {
+	// __calc_delta()가 하는 일은 결국 아래 수식과 같음.
+	//
+	//                         1024
+	//                  ---------------
+	// delta = delta *  se->load.weight
 	if (unlikely(se->load.weight != NICE_0_LOAD))
 		delta = __calc_delta(delta, NICE_0_LOAD, &se->load);
 
+	// 따라서 NICE 0인 경우 delta = delta가 되므로 delta를 리턴하고 끝
 	return delta;
 }
 
@@ -609,24 +667,39 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
  *
  * p = (nr <= nl) ? l : l*nr/nl
  */
+// 런큐에 태스크가 sched_nr_latency 이상 존재한다면 실행주기를 nr_running을
+// 반영해서 더 길게 만든다.
+// 6ms or nr_running * 0.75ms
 static u64 __sched_period(unsigned long nr_running)
 {
+	// sched_nr_latency = 8 or sysctl_sched_latency / sysctl_sched_min_granularity
+	// nr_running이 sched_nr_latency보다 크다면
+	// 보통 9개 이상의 태스크가 런큐에 있다면..
 	if (unlikely(nr_running > sched_nr_latency))
+		// nr_running * 0.75
 		return nr_running * sysctl_sched_min_granularity;
 	else
+		// 6ms
 		return sysctl_sched_latency;
 }
 
 /*
  * We calculate the wall-time slice from the period by taking a part
  * proportional to the weight.
+ 엔티티의 weight에 기반해서 스케쥴링주기에서 엔티티가 사용할 수 있는
+ 타임슬라이스를 계산한다.
  *
  * s = p*P[w/rw]
  */
 static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// se포함한 cfs_rq의 태스크 갯수를 포함해서 실행주기를 구한다.
+	// 보통 6ms이지만 enqueue되어 있는 태스크갯수가 8개 이상이라면
+	// 태스크가 최소 0.75ms의 실행시간을 보장받을 수 없으므로
+	// 재조정한다.
 	u64 slice = __sched_period(cfs_rq->nr_running + !se->on_rq);
 
+	// iterate like bottom-up
 	for_each_sched_entity(se) {
 		struct load_weight *load;
 		struct load_weight lw;
@@ -634,12 +707,21 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		cfs_rq = cfs_rq_of(se);
 		load = &cfs_rq->load;
 
+		// 런큐에 enqueue안된 태스크는 반영해서 slice를 구함..
 		if (unlikely(!se->on_rq)) {
 			lw = cfs_rq->load;
 
 			update_load_add(&lw, se->load.weight);
 			load = &lw;
 		}
+		//         se->load.weight
+		// slice * ---------------
+		//         cfs_rq's load
+		// 위와 같은 방식으로 slice를 변환해서 리턴함
+		// vruntime을 계산했던것과는 조금 다름.
+		// 실행주기 slice를 내가 나눠가져야 하는데, 내가 속한 cfs_rq의 전체 load weight(내꺼를 포함한)
+		// 에서 내가 차지한 비율만큼의 slice를 계산하기 위해서임.
+		// se 계층구조를 순회하면서 계속 slice를 구함..
 		slice = __calc_delta(slice, se->load.weight, load);
 	}
 	return slice;
@@ -650,6 +732,9 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
  *
  * vs = s/w
  */
+// cfs_rq의 스케줄링 주기에서 스케줄링 엔티티가 차지하는 타임슬라이스를 계산함
+// 이때 엔티티의 load weight을 기준으로 다르게 할당되며,
+// lw이 클수록 큰 ts, 작을수록 작은 ts를 받게 된다.
 static u64 sched_vslice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	return calc_delta_fair(sched_slice(cfs_rq, se), se);
@@ -698,30 +783,49 @@ void init_entity_runnable_average(struct sched_entity *se)
 /*
  * Update the current task's runtime statistics.
  */
+// current 태스크의 아래필드를 갱신함.
+// 1. exec_start = rq->clock_task
+// 2. sum_exec_runtime += delta
+// 3. vruntime += weighted delta
+// CFS 런큐의 min_vruntime 갱신
 static void update_curr(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
+	// now = rq->clock_task
 	u64 now = rq_clock_task(rq_of(cfs_rq));
 	u64 delta_exec;
 
 	if (unlikely(!curr))
 		return;
 
+	// 런큐의 시간이 갱신된 최근시간이 current 태스크의 최근 실행된 시간보다 크지 않다면
+	// 이미 current 태스크의 시간정보는 갱신되어 있는 것이므로 종료..
 	delta_exec = now - curr->exec_start;
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
+	// 그게 아니라면, 런큐의 clock_task 필드와 동일하게 설정해줌..
 	curr->exec_start = now;
 
 	schedstat_set(curr->statistics.exec_max,
 		      max(delta_exec, curr->statistics.exec_max));
 
+	// current 태스크는 rq->clock_task - curr->exec_start 차만큼 실행된것이므로
+	// 왜그렇게 볼수있지? -> 
+	// 누적실행시간을 나타내는 sum_exec_runtime 필드에 그 차를 더해준다.
 	curr->sum_exec_runtime += delta_exec;
 	schedstat_add(cfs_rq, exec_clock, delta_exec);
 
+	// 실행시간을 태스크의 load weight를 가중치로 고려해서 변환함
+	// 이 값은 vruntime에 더해짐.. load weight이 클수록 실행시간은 적어진다.
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+	// cfs런큐의 minimum vruntime을 갱신한다. 아래중 하나로 갱신된다.
+	// 1) cfs_rq->min_vruntime
+	// 2) cfs_rq->curr->vruntime
+	// 3) vruntime of leftmost entity
 	update_min_vruntime(cfs_rq);
 
+	// !se->my_q
 	if (entity_is_task(curr)) {
 		struct task_struct *curtask = task_of(curr);
 
@@ -846,6 +950,7 @@ update_stats_curr_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	/*
 	 * We are starting a new run period:
 	 */
+	// 태스크의 가장최근실행시간을 런큐의 clock_task 값으로 설정함.
 	se->exec_start = rq_clock_task(rq_of(cfs_rq));
 }
 
@@ -2417,10 +2522,17 @@ static inline void account_numa_dequeue(struct rq *rq, struct task_struct *p)
 static void
 account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// cfs_rq->load->weight += se->load.weight
+	// cfs_rq->load->inv_weight = 0 -------> 추후에 재계산하기 위해 초기화해놓기
 	update_load_add(&cfs_rq->load, se->load.weight);
+	// se가 부모가 없는 최상위 se라면 런큐의 load에도 더해준다.
+	// 부모 se가 없는 se는 root task group의 se인데.. root task group의 cfs_rq는 rq->cfs_rq겠지..
+	// 다른 경우도 있나?? 없어보이네... 시스템의 모든 태스크는 무조건 어떤 tg에는 들어갈것이므로...
+	// rq->load->weight += se->load.weight
 	if (!parent_entity(se))
 		update_load_add(&rq_of(cfs_rq)->load, se->load.weight);
 #ifdef CONFIG_SMP
+	// rq->cfs_task에 태스크를 추가한다.
 	if (entity_is_task(se)) {
 		struct rq *rq = rq_of(cfs_rq);
 
@@ -2428,19 +2540,32 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		list_add(&se->group_node, &rq->cfs_tasks);
 	}
 #endif
+	// cfs_rq의 태스크개수를 나타내는 필드 nr_running을 증가시킴
 	cfs_rq->nr_running++;
 }
 
+// 1. cfs->load -= se->load.weight 
+// 2. rq->load -= se->load.weight if entity is highest 
+// 3. delete entity from cfs tasks list in runqueue 
+// 4. cfs_rq->nr_running--
 static void
 account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// CFS 런큐에 enqueue된 모든 태스크의 load weight의 합을 나타내는
+	// load 필드에서 dequeue될 엔티티의 load weight을 뺀다.
 	update_load_sub(&cfs_rq->load, se->load.weight);
+	// 엔티티가 부모가 없는 최상위 엔티티라면(CPU의 런큐에 직접 enqueue되는 최상위 엔티티라면)
+	// 런큐에 enqueue된 모든 태스크의 load weight의 합을 나타내는
+	// load 필드에서 dequeue될 엔티티의 load weight을 뺀다.
 	if (!parent_entity(se))
 		update_load_sub(&rq_of(cfs_rq)->load, se->load.weight);
+	// 태스크를 위한 엔티티라면 런큐에 enqueue된 모든 normal 태스크 리스트를
+	// 나타내는 cfs_tasks에서 해당 엔티티를 제거한다.
 	if (entity_is_task(se)) {
 		account_numa_dequeue(rq_of(cfs_rq), task_of(se));
 		list_del_init(&se->group_node);
 	}
+	// CFS 런큐의 실행가능한 normal 태스크 개수를 1감소시킴.
 	cfs_rq->nr_running--;
 }
 
@@ -2510,16 +2635,27 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 	struct sched_entity *se;
 	long shares;
 
+	// CFS 런큐와 연관된 태스크 그룹을 구함
+	// CFS 런큐가 특정태스크그룹 소유라면 연관된 tg를 리턴
+	// CFS 런큐가 CPU의 소유라면 root task group을 리턴
 	tg = cfs_rq->tg;
+	// 태스크그룹을 나타내는 스케줄링 엔티티를 구함
+	// root taskgroup이라면 se가 없음.
 	se = tg->se[cpu_of(rq_of(cfs_rq))];
+	// root task group의 cfs런큐였다면 종료..
 	if (!se || throttled_hierarchy(cfs_rq))
 		return;
 #ifndef CONFIG_SMP
+	// se의 load.weight이 태스크그룹의 shares와 같다면
+	// 별도로 se의 share를 계산할 필요가 없으므로
+	// 리턴..
 	if (likely(se->load.weight == tg->shares))
 		return;
 #endif
+	// ???
 	shares = calc_cfs_shares(cfs_rq, tg);
 
+	// ???
 	reweight_entity(cfs_rq_of(se), se, shares);
 }
 #else /* CONFIG_FAIR_GROUP_SCHED */
@@ -3131,9 +3267,11 @@ static void check_spread(struct cfs_rq *cfs_rq, struct sched_entity *se)
 #endif
 }
 
+// 스케쥴링 엔티티의 vruntime을 결정한다.
 static void
 place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 {
+	// 일단 엔티티가 enqueue될 min_vruntime을 기본값으로 가지고 시작한다.
 	u64 vruntime = cfs_rq->min_vruntime;
 
 	/*
@@ -3142,9 +3280,18 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 	 * little, place the new task so that it fits in the slot that
 	 * stays open at the end.
 	 */
+
+	// 새롭게 생성된 태스크의 스케쥴링 엔티티이고 START_DEBIG feature를 사용한다면
+	// 엔티티의 vruntime을 엔티티의 vslice만큼 증가시킨다.
+	// 기존 태스크들이 forked task에 의해 기아상태에 빠지는것을 막기위함.
 	if (initial && sched_feat(START_DEBIT))
 		vruntime += sched_vslice(cfs_rq, se);
 
+	// 새롭게 생성된 태스크의 엔티티가 아니라면
+	// 잠들었다가 다시 깨어난 엔티티일것이므로 좀 더 빠르게 실행될 수 있게 
+	// vruntime을 작게 만들어준다.
+	// GENTL_FAIR_SLEEPERS가 활성화되어 있을 경우 6>>2 = 3
+	// 비활성화되어 있을 경우 6
 	/* sleeps up to a single latency don't count. */
 	if (!initial) {
 		unsigned long thresh = sysctl_sched_latency;
@@ -3160,12 +3307,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 	}
 
 	/* ensure we never gain time by being placed backwards. */
+	// 엔티티의 vruntime을 기존 값과 이 함수에서 계산한 값중 
+	// 큰 값으로 갱신한다. 
 	se->vruntime = max_vruntime(se->vruntime, vruntime);
 }
 
 static void check_enqueue_throttle(struct cfs_rq *cfs_rq);
 
-static inline void check_schedstat_required(void)
+static inline void check_schedstae_required(void)
 {
 #ifdef CONFIG_SCHEDSTATS
 	if (schedstat_enabled())
@@ -3191,7 +3340,15 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	/*
 	 * Update the normalized vruntime before updating min_vruntime
 	 * through calling update_curr().
+	 update_curr()을 호출해서 min_vruntime을 갱신하기 전에 
+	 normalizedvruntime을 갱신한다.
 	 */
+	// ENQUEUE_WAKEUP를 사용하지 않거나 ENQUEUE_WAKING 플래그를 사용할 경우
+	// vruntime을 nomalize해준다. 결과적으로 늦게 실행될텐데...
+	// 대부분 여기를 실행하고 여길 실행안하는 경우는 아래와 같음
+	// - try_to_wake_up_local()
+	// - enqueue_task_fair() 에서 엔티티의 조상들을 enqueue_entity 할 때..
+	// - ENQUEUE_WAKEUP을 쓰고 ENQUEUE_WAKING은 안쓰는 경우
 	if (!(flags & ENQUEUE_WAKEUP) || (flags & ENQUEUE_WAKING))
 		se->vruntime += cfs_rq->min_vruntime;
 
@@ -3200,10 +3357,15 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 */
 	update_curr(cfs_rq);
 	enqueue_entity_load_avg(cfs_rq, se);
+	// se의 load weight을 cfs_rq에 추가하고 필요하면 rq에도 추가한다.
+	// rq->cfs_tasks에도 태스크를 추가함.
+	// cfs_rq->nr_running++
 	account_entity_enqueue(cfs_rq, se);
+	// ???
 	update_cfs_shares(cfs_rq);
 
 	if (flags & ENQUEUE_WAKEUP) {
+		// se의 vruntime을 결정한다.
 		place_entity(cfs_rq, se, 0);
 		if (schedstat_enabled())
 			enqueue_sleeper(cfs_rq, se);
@@ -3214,10 +3376,19 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		update_stats_enqueue(cfs_rq, se);
 		check_spread(cfs_rq, se);
 	}
+	// se가 cfs_rq의 current se가 아니라면...
+	// 트리에 넣어야 함. current se인 경우는 머지???
 	if (se != cfs_rq->curr)
+		// CFS 런큐의 레드블랙트리의 적절한 위치에 추가한다.
 		__enqueue_entity(cfs_rq, se);
+	// 엔티티의 on_rq를 1로 설정함.
+	// 엔티티가 레드블랙트리에 있었던 이번에 넣었던 상관없이..
+	// 특정 CFS 런큐에 들어갔으므로...
+	// 나 CFS 런큐에 들어갔어요라고 표시한다.
 	se->on_rq = 1;
 
+	// CFS 런큐에 처음으로 태스크가 들어왔다면
+	// rq->leaf_cfs_rq_list에 cfs 런큐를 추가함.
 	if (cfs_rq->nr_running == 1) {
 		list_add_leaf_cfs_rq(cfs_rq);
 		check_enqueue_throttle(cfs_rq);
@@ -3257,6 +3428,8 @@ static void __clear_buddies_skip(struct sched_entity *se)
 	}
 }
 
+// 인자로 전달된 스케줄링 엔티티가 last, next, skip 필드에 설정되어 있다면
+// 각 필드에서 clear해준다.
 static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	if (cfs_rq->last == se)
@@ -3271,23 +3444,50 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq);
 
+// 1. current 엔티티의 아래 필드를 갱신하고 CFS 런큐의 min_vruntime도 갱신한다.
+//    - exec_start, sum_exec_runtime, vruntime
+// 2. 인자로 전달된 스케줄링 엔티티가 last, next, skip 필드에 설정되어 있다면
+// 각 필드에서 clear해준다.
+// 3. 인자로 전달된 엔티티가 current 엔티티가 아니라면 레드블랙 트리에서 엔티티를 dequeue한다.
+// 4. 추가로 dequeue한 엔티티가 leftmost 인 경우에 한해 leftmost 엔티티를 갱신해준다.
+// 5. 엔티티가 dequeue된 상태임을 설정한다.
+// 6. dequeue된 엔티티를 CFS 런큐(필요할 경우 런큐)의 로드에서 뺀다.
+// 7. 엔티티가 태스크를 위한 것이라면 cfs tasks list에서도 빼고 nr_running도 감소시킨다.
+// 8. DEQUEUE_SLEEP 플래그를 사용하지 않는다면 엔티티의 vruntime을 min_vruntime만큼 감소시켜준다.
+// 9. CFS 런큐의 min_vruntime을 갱신한다.
 static void
 dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	/*
 	 * Update run-time statistics of the 'current'.
 	 */
+	// current 태스크의 아래필드를 갱신함.
+	// 1. exec_start = rq->clock_task
+	// 2. sum_exec_runtime += delta
+	// 3. vruntime += weighted delta
+	// CFS 런큐의 min_vruntime 갱신
 	update_curr(cfs_rq);
 	dequeue_entity_load_avg(cfs_rq, se);
 
 	if (schedstat_enabled())
 		update_stats_dequeue(cfs_rq, se, flags);
 
+	// 인자로 전달된 스케줄링 엔티티가 last, next, skip 필드에 설정되어 있다면
+	// 각 필드에서 clear해준다.
 	clear_buddies(cfs_rq, se);
 
+	// 엔티티가 CFS 런큐의 current 엔티티가 아니라면
 	if (se != cfs_rq->curr)
+		// 1.인자로 전달한 스케줄링 엔티티가 leftmost 엔티티였다면
+		// CFS 런큐의 leftmost 엔티티를 다음으로 vruntime이 작은 엔티티로 설정한다.
+		// 2.레드블랙 트리에서 엔티티를 제거한다.
 		__dequeue_entity(cfs_rq, se);
+	// 엔티티가 dequeue된 상태임을 설정한다.
 	se->on_rq = 0;
+	// 1. cfs->load -= se->load.weight 
+	// 2. rq->load -= se->load.weight if entity is highest 
+	// 3. delete entity from cfs tasks list in runqueue 
+	// 4. cfs_rq->nr_running--
 	account_entity_dequeue(cfs_rq, se);
 
 	/*
@@ -3295,12 +3495,18 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 * update can refer to the ->curr item and we need to reflect this
 	 * movement in our normalized position.
 	 */
+	// dequeue flag중 하나인 DEQUEUE_SLEEP을 사용하지 않는다면
+	// 엔티티의 vruntime을 min_vruntime만큼 감소시켜준다.왜??
 	if (!(flags & DEQUEUE_SLEEP))
 		se->vruntime -= cfs_rq->min_vruntime;
 
 	/* return excess runtime on last dequeue */
 	return_cfs_rq_runtime(cfs_rq);
 
+	// CFS 런큐의 min_vruntime을 아래 값 중 하나로 갱신된다.
+	// 1. current 엔티티의 vruntime
+	// 2. leftmost 엔티티의 vruntime
+	// 3. CFS 런큐의 기존 min_vruntime
 	update_min_vruntime(cfs_rq);
 	update_cfs_shares(cfs_rq);
 }
@@ -3345,9 +3551,14 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 		resched_curr(rq_of(cfs_rq));
 }
 
+// se를 current se로 설정하기 위해 아래 작업을 수행한다.
+// 1) 아직 enqueue되어 있다면 트리에서 dequeue함
+// 2) se의 exec_start 필드를 갱신해서 가장 최근 실행시간을 갱신함
+// 3) 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 static void
 set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// 곧 current가 될 se가 레드블랙 트리에 있다면
 	/* 'current' is not kept within the tree. */
 	if (se->on_rq) {
 		/*
@@ -3357,10 +3568,13 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		 */
 		if (schedstat_enabled())
 			update_stats_wait_end(cfs_rq, se);
+		// 태스크를 트리에서 dequeue한다.
 		__dequeue_entity(cfs_rq, se);
 		update_load_avg(se, 1);
 	}
 
+	// se의 가장 최근 실행시간을 나타내는 exec_start 필드를
+	// 런큐의 clock_task 필드로 설정함.
 	update_stats_curr_start(cfs_rq, se);
 	cfs_rq->curr = se;
 #ifdef CONFIG_SCHEDSTATS
@@ -3374,6 +3588,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 			se->sum_exec_runtime - se->prev_sum_exec_runtime);
 	}
 #endif
+	// 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 	se->prev_sum_exec_runtime = se->sum_exec_runtime;
 }
 
@@ -3386,10 +3601,16 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
  * 2) pick the "next" process, since someone really wants that to run
  * 3) pick the "last" process, for cache locality
  * 4) do not run the "skip" process, if something else is available
+ 다음에 실행할 프로세스를 선택하는 함수, 아래 순서대로 마음속에 새겨야 함..
+ 1) processes/tg 사이의 공정함을 유지해야 함
+ 2) 실행되길 원하는 애를 next process로 선택함
+ 3) 캐시 히트를 위해 last porcess를 선택함.
+ 4) 실행가능한 놈이 없다면, skip
  */
 static struct sched_entity *
 pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
+	// get leftmost entity from rbtree
 	struct sched_entity *left = __pick_first_entity(cfs_rq);
 	struct sched_entity *se;
 
@@ -3397,6 +3618,9 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * If curr is set we have to see if its left of the leftmost entity
 	 * still in the tree, provided there was anything in the tree at all.
 	 */
+	// CFS 런큐에 leftmost entity가 없거나
+	// current 태스크가 left most보다 vruntime이 작다면
+	// current 태스크를 next 태스크의 후보로 설정함.
 	if (!left || (curr && entity_before(curr, left)))
 		left = curr;
 
@@ -3406,46 +3630,80 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * Avoid running the skip buddy, if running something else can
 	 * be done without getting too unfair.
 	 */
+	// 고른 놈이 skip buddy로 설정되어 있다면 차선책을 골라야 함..
+	// 물론 못고를수도 있음..
 	if (cfs_rq->skip == se) {
 		struct sched_entity *second;
 
+		// next 후보가 current se라면...
 		if (se == curr) {
+			// leftmost entity를 가져옴..
 			second = __pick_first_entity(cfs_rq);
+		// next 후보가 leftmost se라면..
 		} else {
+			// leftmost 다음으로 vruntime이 작은 se를 가져옴..
 			second = __pick_next_entity(se);
+			// leftmost 외의 다른 se가 없거나
+			// current se의 vruntime이 second se보다 작다면
 			if (!second || (curr && entity_before(curr, second)))
+				// 그냥 current se를 second로 선정함..
 				second = curr;
 		}
 
+		// second 선정에 성공했고..
+		// second의 vruntime이 left보다 작거나
+		// second의 vruntime이 left보다 wakeup granurarity이상 크지 않을 경우..
+		// -> second대신 left를 쓰기에는 second가 덜 크기 때문??
+		// second는 leftmost, leftmost 다음이고 left는 leftmost나 curr인데... 
+		// 아직 실행도 안된 애들의 vruntime의 차가 wakeup granurarity보다
+		// 더 큰지 아닌지를 비교하는게 무슨 의미일까?
+		// 고른 se가 skip이라서 차선을 찾는 과정인데...
 		if (second && wakeup_preempt_entity(second, left) < 1)
 			se = second;
 	}
 
 	/*
 	 * Prefer last buddy, try to return the CPU to a preempted task.
+	 last se가 설정되어 있고
+	 last의 vruntime이 left보다 작거나,
+	 last - left < wakeup gran이라면
+	 last를 next se로 설정..
 	 */
 	if (cfs_rq->last && wakeup_preempt_entity(cfs_rq->last, left) < 1)
 		se = cfs_rq->last;
 
 	/*
 	 * Someone really wants this to run. If it's not unfair, run it.
+	 next se가 설정되어 있고
+	 next의 vruntime이 left보다 작거나,
+	 next - left < wakeup gran이라면
+	 next를실행..
 	 */
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
 		se = cfs_rq->next;
 
+	// se가 last, next, skip에 설정되어있다면 clear..
 	clear_buddies(cfs_rq, se);
 
+	// 선택된 se를 리턴함..
 	return se;
 }
 
 static bool check_cfs_rq_runtime(struct cfs_rq *cfs_rq);
 
+// current 태스크가 아직 런큐에서 빠지지 않았다면(prev->on_rq)
+// 1.current 태스크, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+// 2.current 태스크를 레드블랙트리에 다시 enqueu함. 
+// 3.current 태스크가 다시 트리에 들어갔으므로 CFS 런큐의 curr를 NULL로 설정함.
 static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 {
 	/*
 	 * If still on the runqueue then deactivate_task()
 	 * was not called and update_curr() has to be done:
 	 */
+	// 아직 런큐에서 빠지지 않은 se라면
+	// 빠지기 직전까지 current 태스크, CFS 런큐의 런타임정보, 시간정보를
+	// 갱신해야 함.
 	if (prev->on_rq)
 		update_curr(cfs_rq);
 
@@ -3458,12 +3716,16 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 			update_stats_wait_start(cfs_rq, prev);
 	}
 
+	// 아직 dequeue 안된 se라면..
+	// 언제 여기를 탈까..
 	if (prev->on_rq) {
 		/* Put 'current' back into the tree. */
+		// current를 CFS 런큐에 다시 집어넣음.
 		__enqueue_entity(cfs_rq, prev);
 		/* in !on_rq case, update occurred at dequeue */
 		update_load_avg(prev, 0);
 	}
+	// current를 put했으니 curr 필드를 NULL로 설정함.
 	cfs_rq->curr = NULL;
 }
 
@@ -4318,6 +4580,8 @@ static inline void hrtick_update(struct rq *rq)
  * The enqueue_task method is called before nr_running is
  * increased. Here we update the fair scheduling stats and
  * then put the task into the rbtree:
+ enqueue_task는 nr_running이 증가되기전에 호출됨.
+ cfs stat 갱신하고 태스크를 rbtree에 put
  */
 static void
 enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
@@ -4325,9 +4589,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 
+	// iterate se using bottom-up method
+	// 태스크의 엔티티가 속한 엔티티 계층구조를 거슬러올라가면서
+	// 상위 엔티티를 모두 각자가 대응하는cfs_rq에 enqueue한다.
 	for_each_sched_entity(se) {
+		// 계층구조에서 선택된 엔티티가 이미 enqueue되었다면
+		// 이 과정을 중단한다. 이 경우, enqueue된 엔티티부터 최상위까지는
+		// 모두 enqueue되어 있기 때문이다.
 		if (se->on_rq)
 			break;
+
+		// 엔티티가 enqueue될 CFS 런큐를 찾아 엔티티를 enqueue한다.
 		cfs_rq = cfs_rq_of(se);
 		enqueue_entity(cfs_rq, se, flags);
 
@@ -4339,11 +4611,16 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		*/
 		if (cfs_rq_throttled(cfs_rq))
 			break;
+		// CFS 런큐에 태스크가 enqueue되었으므로 h_nr_running도 증가시켜준다.
 		cfs_rq->h_nr_running++;
 
+		// 부모 se의 enqueue과정에서부터는 flag를 ENQUEUE_WAKEUP으로 바꾼다.
+		// 부모 se의 vruntime이 normalize되는걸 방지하는게 목적이다.
 		flags = ENQUEUE_WAKEUP;
 	}
 
+	// 이미 enqueue되어 있는 se라면 h_nr_running만 증가시킨다.
+	// h_nr_running은 자식 se의 nr_running을 모두 더한것같음..
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running++;
@@ -4355,6 +4632,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 	}
 
+	// 최상위 se까지 xxx을 끝냈다면 런큐의 nr_running을 증가시킨다.
 	if (!se)
 		add_nr_running(rq, 1);
 
@@ -4374,8 +4652,20 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct sched_entity *se = &p->se;
 	int task_sleep = flags & DEQUEUE_SLEEP;
 
+	// 태스크의 엔티티가 속한 엔티티 계층구조를 순회하며
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
+// 1. current 엔티티의 아래 필드를 갱신하고 CFS 런큐의 min_vruntime도 갱신한다.
+//    - exec_start, sum_exec_runtime, vruntime
+// 2. 인자로 전달된 스케줄링 엔티티가 last, next, skip 필드에 설정되어 있다면
+// 각 필드에서 clear해준다.
+// 3. 인자로 전달된 엔티티가 current 엔티티가 아니라면 레드블랙 트리에서 엔티티를 dequeue한다.
+// 4. 추가로 dequeue한 엔티티가 leftmost 인 경우에 한해 leftmost 엔티티를 갱신해준다.
+// 5. 엔티티가 dequeue된 상태임을 설정한다.
+// 6. dequeue된 엔티티를 CFS 런큐(필요할 경우 런큐)의 로드에서 뺀다.
+// 7. 엔티티가 태스크를 위한 것이라면 cfs tasks list에서도 빼고 nr_running도 감소시킨다.
+// 8. DEQUEUE_SLEEP 플래그를 사용하지 않는다면 엔티티의 vruntime을 min_vruntime만큼 감소시켜준다.
+// 9. CFS 런큐의 min_vruntime을 갱신한다.
 		dequeue_entity(cfs_rq, se, flags);
 
 		/*
@@ -4386,26 +4676,41 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		*/
 		if (cfs_rq_throttled(cfs_rq))
 			break;
+		// CFS 런큐의 하위 CFS 런큐의 nr_running도 포함해서 엔티티 개수를 나타내는
+		// h_nr_running을 감소시킨다.
 		cfs_rq->h_nr_running--;
 
 		/* Don't dequeue parent if it has other entities besides us */
+		// dequeue한 엔티티뿐만 아니라 다른 엔티티도 가지고 있는
+		// CFS 런큐의 경우에는 dequeue하지 않는다.
 		if (cfs_rq->load.weight) {
 			/*
 			 * Bias pick_next to pick a task from this cfs_rq, as
 			 * p is sleeping when it is within its sched_slice.
 			 */
+			// dequeue 플래그로 DEQUEUE_SLEEP이 사용되고 엔티티가
+			// 부모엔티티를 가지고 있다면 태스크의 엔티티를 next 필드에 설정한다.
+			// next buddy로 설정된 엔티티는 추후에 다음에 실행할 엔티티를
+			// 선택하는 과정에서 우선 고려된다. TBD 왜 next로 설정할까..
 			if (task_sleep && parent_entity(se))
 				set_next_buddy(parent_entity(se));
 
+			// 
 			/* avoid re-evaluating load for this entity */
 			se = parent_entity(se);
 			break;
 		}
+		// 태스크를 위한 엔티티를 제외하고 나머지 상위 엔티티는 모두
+		// DEQUEUE_SLEEP flag를 추가로 사용해서 dequeue 작업을 수행한다.
 		flags |= DEQUEUE_SLEEP;
 	}
 
+	// dequeue가 진행되지 않고 멈춘 위치의 엔티티부터
+	// 다시 엔티티 계층구조를 bottom up 방식으로 탐색을 수행함.
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
+		// 하위 CFS런큐의 nr_running까지 모두 포함하는 필드이므로
+		// 하위 엔티티가 dequeue된 것을 반영해준다.
 		cfs_rq->h_nr_running--;
 
 		if (cfs_rq_throttled(cfs_rq))
@@ -4415,6 +4720,8 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 	}
 
+	// 최상위 엔티티까지 탐색을 마쳤다면
+	// 런큐의 nr_running에도 태스크가 dequeue된 것을 반영해준다.
 	if (!se)
 		sub_nr_running(rq, 1);
 
@@ -5159,9 +5466,12 @@ static int cpu_util(int cpu)
  * select_task_rq_fair: Select target runqueue for the waking task in domains
  * that have the 'sd_flag' flag set. In practice, this is SD_BALANCE_WAKE,
  * SD_BALANCE_FORK, or SD_BALANCE_EXEC.
+ 깨어나는 태스크가 실행할 런큐를 선택한다.
  *
  * Balances load by selecting the idlest cpu in the idlest group, or under
  * certain conditions an idle sibling cpu if the domain has SD_WAKE_AFFINE set.
+ 제일 한가한 그룹내에서 제일 한가한 cpu를 선택해서 load balancing을 수행한다.
+ SD_WAKE_AFFINE 플래그를 사용하는 도메인같은 특정 상황에서는 idle sibling cpu를 선택한다.
  *
  * Returns the target cpu number.
  *
@@ -5278,6 +5588,9 @@ static void task_dead_fair(struct task_struct *p)
 }
 #endif /* CONFIG_SMP */
 
+// current 태스크를 se가 preemption할 수 있는지 체크한다.
+// 태스크의 최소 실행시간인 sysctl_sched_wakeup_granularity을
+// 가중치를 고려해서 재계산한다.
 static unsigned long
 wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
 {
@@ -5313,18 +5626,24 @@ wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
  *  w(c, s3) =  1
  *
  */
+// return -1, 1)current se의 vruntime이 se보다 작은 경우
+// return  1, 2)current-se's vruntime - se's vruntime > wakeup granurarity
+// return  0, 1)도 아니고 2)도 아닌 경우..
 static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
+	// current 태스크가 더 실행되지는 않은 경우
 	if (vdiff <= 0)
 		return -1;
 
 	gran = wakeup_gran(curr, se);
+	// current se와 se의 vruntime 차이가 wakeup granurarity 이상이라면
 	if (vdiff > gran)
 		return 1;
 
+	// current 태스크가 se 보다는 더 실행되었지만 wakeup gran만큼은 아닌경우
 	return 0;
 }
 
@@ -5448,9 +5767,12 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev)
 
 again:
 #ifdef CONFIG_FAIR_GROUP_SCHED
+	// TASK_RUNNING 상태의 태스크가 CFS 런큐에 없다면 idle balancing
 	if (!cfs_rq->nr_running)
 		goto idle;
 
+	// current 태스크가 fair class 소속이 아니라면
+	// 간단하게 next 태스크를 고를 수 있다.
 	if (prev->sched_class != &fair_sched_class)
 		goto simple;
 
@@ -5470,27 +5792,21 @@ again:
 		 * have to consider cfs_rq->curr. If it is still a runnable
 		 * entity, update_curr() will update its vruntime, otherwise
 		 * forget we've ever seen it.
+		   CFS 런큐의 current 태스크가 비어있다면 prev는 딴 클래스놈임..???
+		   TBD 언제 cfs_rq->curr가 NULL이 될까??
+		   비어있지 않다면...
 		 */
-		if (curr) {
-			if (curr->on_rq)
-				update_curr(cfs_rq);
-			else
-				curr = NULL;
 
-			/*
-			 * This call to check_cfs_rq_runtime() will do the
-			 * throttle and dequeue its entity in the parent(s).
-			 * Therefore the 'simple' nr_running test will indeed
-			 * be correct.
-			 */
-			if (unlikely(check_cfs_rq_runtime(cfs_rq)))
-				goto simple;
-		}
-
+		// 레드블랙트리에서 실행할 se를 구함..
+		// 후보 - 1)curr 2)leftmost 3)2nd leftmost 4)last 5)next
 		se = pick_next_entity(cfs_rq, curr);
+		// se가 tg를 나타낼 경우 tg 소유의 CFS 런큐를 구함.
 		cfs_rq = group_cfs_rq(se);
+	// 자신의 cfs 런큐가 없는 se의 경우..
+        // 계층구조를 top-down 방식으로 탐색하며 pick_next_entity함.
 	} while (cfs_rq);
 
+	// se의 task_struct를 구함.
 	p = task_of(se);
 
 	/*
@@ -5498,42 +5814,91 @@ again:
 	 * is a different task than we started out with, try and touch the
 	 * least amount of cfs_rqs.
 	 */
+	 // current 태스크가 아닌 태스크가 next 태스크로 선택되었다면..
 	if (prev != p) {
-		struct sched_entity *pse = &prev->se;
-
+		// 두 se가 같은 tg에 속할 때까지 아래를 반복함
+		// 1) pse의 depth가 같거나 크다면 같을때까지 위로 올라가면서 
+		// 1-1) pse, CFS런큐의 런타임, 시간정보를 갱신함
+		// 1-2) pse를 트리에 enqueue함
+		// 1-3) CFS런큐의 curr필드를 NULL로 설정함.
+		// 2) se의 depth가 같거나 크다면 같을때까지 위로 올라가면서
+		// 2-1) se가 아직 enqueue되어 있다면 트리에서 dequeue함
+		// 2-2) se의 exec_start 필드를 런큐를 참고해서 갱신함
+		// 2-3) sum_exec_runtime을 백업함.
 		while (!(cfs_rq = is_same_group(se, pse))) {
 			int se_depth = se->depth;
 			int pse_depth = pse->depth;
 
+			// se의 depth가 아직 낮다면(더 높은 계층구조의 위치)
 			if (se_depth <= pse_depth) {
+				// pse가 아직 CFS 런큐에서 빠지지 않았다면(pse->on_rq)
+				// 1.pse, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+				// 2.pse의 레드블랙트리에 다시 enqueu함.
+				// 3.pse가 다시 트리에 들어갔으므로 CFS 런큐의 curr를
+				// NULL로 설정함.
 				put_prev_entity(cfs_rq_of(pse), pse);
+				// pse가 가리키는 se를 pse의 부모로 변경함.
+				// pse의 depth가 증가하게 됨.
 				pse = parent_entity(pse);
 			}
+			// se의 depth가 작지 않다면
 			if (se_depth >= pse_depth) {
+				// se를 current se로 설정하기 위해 아래 작업을 수행한다.
+				// 1) 아직 enqueue되어 있다면 트리에서 dequeue함
+				// 2) se의 exec_start 필드를 갱신해서 가장 최근 실행시간을 갱신함
+				// 3) 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 				set_next_entity(cfs_rq_of(se), se);
+				// se가 가리키는 se를 se의 부모로 변경함.
+				// se의 depth가 증가하게 됨.
 				se = parent_entity(se);
 			}
 		}
 
+		// 이제 pse와 se가 같은 tg에 속해있게 된다.
+		// pse가 아직 CFS 런큐에서 빠지지 않았다면(pse->on_rq)
+		// 1.pse, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+		// 2.pse의 레드블랙트리에 다시 enqueu함.
+		// 3.pse가 다시 트리에 들어갔으므로 CFS 런큐의 curr를
+		// NULL로 설정함.
 		put_prev_entity(cfs_rq, pse);
+		// se를 current se로 설정하기 위해 아래 작업을 수행한다.
+		// 1) 아직 enqueue되어 있다면 트리에서 dequeue함
+		// 2) se의 exec_start 필드를 갱신해서 가장 최근 실행시간을 갱신함
+		// 3) 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 		set_next_entity(cfs_rq, se);
 	}
 
 	if (hrtick_enabled(rq))
 		hrtick_start_fair(rq, p);
 
+	// 선택된 next 태스크의 task_struct 구조체를 리턴함.
 	return p;
+// current 태스크가 fair class 소속이 아닐때 next 태스크를 고르는 레이블..
 simple:
 	cfs_rq = &rq->cfs;
 #endif
 
+	// CFS 런큐에 TASK_RUNNNING 상태의 태스크가 없다면
+	// 태스크를 다른 cpu에서 가져와서 실행하도록
+	// idle balancing을 수행하는 idle로 점프함.
 	if (!cfs_rq->nr_running)
 		goto idle;
 
+	// 태스크 prev의 se가 속한 계층구조를 돌면서 CFS 런큐의 curr를 NULL로 설정함.
+	// se가 아직 CFS런큐에서 빠지지 않았다면 아래를 수행한다.
+	// 1.se, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+	// 2.se를 레드블랙트리에 다시 enqueu함.
 	put_prev_task(rq, prev);
 
+	// top-down 방식으로 se의 계층구조를 순회하며 next entity를 구함
+	// next entity로 선택된 se는 트리에서 dequeue된다.
 	do {
+		// 레드블랙트리에서 실행할 se를 구함..
+		// 후보 - 1)curr 2)leftmost 3)2nd leftmost 4)last 5)next
 		se = pick_next_entity(cfs_rq, NULL);
+		// 1) 아직 enqueue되어 있다면 트리에서 dequeue함
+		// 2) se의 exec_start 필드를 갱신해서 가장 최근 실행시간을 갱신함
+		// 3) 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
@@ -5553,6 +5918,8 @@ idle:
 	 * re-start the picking loop.
 	 */
 	lockdep_unpin_lock(&rq->lock);
+	// 런큐에 실행할 태스크가 하나도 없으므로
+	// 다른 cpu에서 태스크를 가져온다.
 	new_tasks = idle_balance(rq);
 	lockdep_pin_lock(&rq->lock);
 	/*
@@ -5560,25 +5927,40 @@ idle:
 	 * possible for any higher priority task to appear. In that case we
 	 * must re-start the pick_next_entity() loop.
 	 */
+	// normal 태스크보다 우선순위가 더 높은 태스크가 enqueue되었음
 	if (new_tasks < 0)
 		return RETRY_TASK;
 
+	// normal 태스크가 enqueue되었으므로 다시 pick한다.
 	if (new_tasks > 0)
 		goto again;
 
+	// 실행가능한 태스크가 없음.
 	return NULL;
 }
 
 /*
  * Account for a descheduled task:
  */
+// 태스크 prev의 se가 속한 계층구조를 돌면서,
+// se가 아직 CFS런큐에서 빠지지 않았다면 아래를 수행한다.
+// 1.se, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+// 2.se를 레드블랙트리에 다시 enqueu함. 
+// 3.se가 다시 트리에 들어갔으므로 CFS 런큐의 curr를 NULL로 설정함.
 static void put_prev_task_fair(struct rq *rq, struct task_struct *prev)
 {
+	// get prev's se
 	struct sched_entity *se = &prev->se;
 	struct cfs_rq *cfs_rq;
 
+	// se가 속한 계층구조를 bottom-up 방식으로 탐색함.
 	for_each_sched_entity(se) {
+		// se가 enqueue될 CFS 런큐를 구함.
 		cfs_rq = cfs_rq_of(se);
+		// se가 아직 CFS 런큐에서 빠지지 않았다면(prev->on_rq)
+		// 1.se, CFS 런큐의 런타임정보, 시간정보를 갱신함.
+		// 2.se를 레드블랙트리에 다시 enqueu함. 
+		// 3.se가 다시 트리에 들어갔으므로 CFS 런큐의 curr를 NULL로 설정함.
 		put_prev_entity(cfs_rq, se);
 	}
 }
@@ -5817,6 +6199,8 @@ static int task_hot(struct task_struct *p, struct lb_env *env)
 	if (sysctl_sched_migration_cost == 0)
 		return 0;
 
+	// 런큐가 동작한 최근시간과 태스크가 실행한 마지막 실행한 시간의 차를 구함.
+	// 이 값이 크지 않다면 실행한지 얼마안된 태스크이고, 캐시핫하다.
 	delta = rq_clock_task(env->src_rq) - p->se.exec_start;
 
 	return delta < (s64)sysctl_sched_migration_cost;
@@ -7500,6 +7884,7 @@ static int idle_balance(struct rq *this_rq)
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
 	 * measure the duration of idle_balance() as idle time.
 	 */
+	// idle balance를 시도하는 시간을 기록함.
 	this_rq->idle_stamp = rq_clock(this_rq);
 
 	if (this_rq->avg_idle < sysctl_sched_migration_cost ||
@@ -7517,10 +7902,12 @@ static int idle_balance(struct rq *this_rq)
 
 	update_blocked_averages(this_cpu);
 	rcu_read_lock();
+	// bottom-up 방식으로 스케줄링 도메인을 탐색함.
 	for_each_domain(this_cpu, sd) {
 		int continue_balancing = 1;
 		u64 t0, domain_cost;
 
+		// 도메인내에서 로드밸런싱을 지원하지 않으면 상위 도메인으로 넘어감.
 		if (!(sd->flags & SD_LOAD_BALANCE))
 			continue;
 
@@ -7529,9 +7916,14 @@ static int idle_balance(struct rq *this_rq)
 			break;
 		}
 
+		// CPU가 idle이 될때의 lb를 지원한다면.. 
 		if (sd->flags & SD_BALANCE_NEWIDLE) {
+			// 현재시간을 기록
 			t0 = sched_clock_cpu(this_cpu);
 
+			// 스케줄링 도메인 sd에 속한 cpu들 중에서 바쁜 애들을
+			// this_cpu로 로드밸런싱한다.
+			// this cpu에 넘긴 태스크의 개수를 리턴한다.
 			pulled_task = load_balance(this_cpu, this_rq,
 						   sd, CPU_NEWLY_IDLE,
 						   &continue_balancing);
@@ -7564,6 +7956,8 @@ static int idle_balance(struct rq *this_rq)
 	 * have been enqueued in the meantime. Since we're not going idle,
 	 * pretend we pulled a task.
 	 */
+	// this rq에 normal 태스크가 존재한다면 
+	// pulled_task를 설정해서 pick하도록 한다.
 	if (this_rq->cfs.h_nr_running && !pulled_task)
 		pulled_task = 1;
 
@@ -7573,12 +7967,17 @@ out:
 		this_rq->next_balance = next_balance;
 
 	/* Is there a task of a high priority class? */
+	// this rq에 실행가능한 태스크가 normal 태스크의 개수와 다르다면
+	// 더 높은 우선순위의 태스크가 존재하는 것임. 
+	// -1을 리턴해서 pick_next_task()에서 모든 스케줄링클래스를 돌며
+	// 다시 pick next task한다.
 	if (this_rq->nr_running != this_rq->cfs.h_nr_running)
 		pulled_task = -1;
 
 	if (pulled_task)
 		this_rq->idle_stamp = 0;
 
+	// 가져온 태스크의 개수를 리턴한다.
 	return pulled_task;
 }
 
@@ -8145,9 +8544,12 @@ static void task_fork_fair(struct task_struct *p)
 
 	raw_spin_lock_irqsave(&rq->lock, flags);
 
+	// update clock, clock_task
 	update_rq_clock(rq);
 
+	// get cfs rq of current task
 	cfs_rq = task_cfs_rq(current);
+	// get current task of cfs rq
 	curr = cfs_rq->curr;
 
 	/*
@@ -8294,13 +8696,19 @@ static void switched_to_fair(struct rq *rq, struct task_struct *p)
  * This routine is mostly called to set cfs_rq->curr field when a task
  * migrates between groups/classes.
  */
+// 런큐의 current se의 계층구조를 순회하며 각 cfs 런큐의 current se로 설정한다.
 static void set_curr_task_fair(struct rq *rq)
 {
 	struct sched_entity *se = &rq->curr->se;
 
+	// se = se->parent
 	for_each_sched_entity(se) {
 		struct cfs_rq *cfs_rq = cfs_rq_of(se);
 
+		// se를 current se로 설정하기 위해 아래 작업을 수행한다.
+		// 1) 아직 enqueue되어 있다면 트리에서 dequeue함
+		// 2) se의 exec_start 필드를 갱신해서 가장 최근 실행시간을 갱신함
+		// 3) 최근에 실행했을때의 최종 exec_runtime 합을 백업해놓는다.
 		set_next_entity(cfs_rq, se);
 		/* ensure bandwidth has been allocated on our new cfs_rq */
 		account_cfs_rq_runtime(cfs_rq, 0);
