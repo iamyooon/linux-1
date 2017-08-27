@@ -59,6 +59,7 @@
 #include <linux/page-debug-flags.h>
 #include <linux/hugetlb.h>
 #include <linux/sched/rt.h>
+#include <linux/low-mem-notify.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -2820,6 +2821,11 @@ retry_cpuset:
 				&preferred_zone);
 	if (!preferred_zone)
 		goto out;
+
+#ifdef CONFIG_LOW_MEM_NOTIFY
+	low_mem_notify();
+#endif
+
 	classzone_idx = zonelist_zone_idx(preferred_zoneref);
 
 	/* First allocation attempt */
