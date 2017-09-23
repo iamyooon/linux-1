@@ -85,6 +85,8 @@ static inline void update_cpu_load_active(struct rq *this_rq) { }
  */
 #define RUNTIME_INF	((u64)~0ULL)
 
+// TBD.idle policy써도 idle 스케줄링 클래스 안쓰자나...
+// 왜 얘만 fair policy가 아니라고 하는거지?
 static inline int idle_policy(int policy)
 {
 	return policy == SCHED_IDLE;

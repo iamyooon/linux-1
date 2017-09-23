@@ -104,10 +104,14 @@ static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(pidmap_lock);
 static void free_pidmap(struct upid *upid)
 {
 	int nr = upid->nr;
+	// get pidmap from upid
 	struct pidmap *map = upid->ns->pidmap + nr / BITS_PER_PAGE;
+	// get pidmap offset
 	int offset = nr & BITS_PER_PAGE_MASK;
 
+	// clear bit as free pid nr
 	clear_bit(offset, map->page);
+	// inc nr_free
 	atomic_inc(&map->nr_free);
 }
 
@@ -168,6 +172,7 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 	max_scan = DIV_ROUND_UP(pid_max, BITS_PER_PAGE) - !offset;
 	for (i = 0; i <= max_scan; ++i) {
 		if (unlikely(!map->page)) {
+			// 걍 여기서 -ENOMEM 리턴하지..
 			void *page = kzalloc(PAGE_SIZE, GFP_KERNEL);
 			/*
 			 * Free the page if someone raced with us
@@ -264,11 +269,17 @@ void free_pid(struct pid *pid)
 	unsigned long flags;
 
 	spin_lock_irqsave(&pidmap_lock, flags);
+	// iterate 0 ~ < pid->level
 	for (i = 0; i <= pid->level; i++) {
+		// get upid of specific pid ns
 		struct upid *upid = pid->numbers + i;
+		// get pid ns from upid
 		struct pid_namespace *ns = upid->ns;
+		// remove upid from pid hash table
 		hlist_del_rcu(&upid->pid_chain);
+		// dec nr_hashed
 		switch(--ns->nr_hashed) {
+		// If remain value is 2 or 1 after decrease it
 		case 2:
 		case 1:
 			/* When all that is left in the pid namespace
@@ -289,6 +300,8 @@ void free_pid(struct pid *pid)
 	}
 	spin_unlock_irqrestore(&pidmap_lock, flags);
 
+	// TBD. 왜 굳이 다시한번 탐색하면서 free할까...
+	// 위 반복문에서 하면 되지...
 	for (i = 0; i <= pid->level; i++)
 		free_pidmap(pid->numbers + i);
 

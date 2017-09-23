@@ -2945,6 +2945,7 @@ static inline int signal_pending(struct task_struct *p)
 	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
 }
 
+// SIGKILL 처리가 필요한 경우
 static inline int __fatal_signal_pending(struct task_struct *p)
 {
 	return unlikely(sigismember(&p->pending.signal, SIGKILL));
@@ -2955,13 +2956,24 @@ static inline int fatal_signal_pending(struct task_struct *p)
 	return signal_pending(p) && __fatal_signal_pending(p);
 }
 
+// return false
+// 1) task is not in TASK_INTERRUPTIBLE or TASK_WAKEKILL
+// 2) no signal is pending
+// return true
+// 1) TASK_INTERRUPTIBLE && signal is pending
+// 2) SIGKILL is pending
 static inline int signal_pending_state(long state, struct task_struct *p)
 {
+	// return false, if TASK_INTERRUPTIBLE or TASK_WAKEKILL is set
 	if (!(state & (TASK_INTERRUPTIBLE | TASK_WAKEKILL)))
 		return 0;
+	// task is in interruptible or wakekill
+	// but not pending signal
+	// return false,
 	if (!signal_pending(p))
 		return 0;
 
+	// task in wakekill but no fatal signal
 	return (state & TASK_INTERRUPTIBLE) || __fatal_signal_pending(p);
 }
 

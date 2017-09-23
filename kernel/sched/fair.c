@@ -144,6 +144,7 @@ static inline void update_load_set(struct load_weight *lw, unsigned long w)
  */
 static unsigned int get_update_sysctl_factor(void)
 {
+	// return 1 ~ 8
 	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
 	unsigned int factor;
 
@@ -156,6 +157,10 @@ static unsigned int get_update_sysctl_factor(void)
 		break;
 	case SCHED_TUNABLESCALING_LOG:
 	default:
+		// cpus 개수가 2^x로 표현될 때...
+		// x를 리턴해줌.
+		// i.e) cpu 개수가 4이면... 2^2이므로
+		// 3 = 1+2
 		factor = 1 + ilog2(cpus);
 		break;
 	}
@@ -163,6 +168,7 @@ static unsigned int get_update_sysctl_factor(void)
 	return factor;
 }
 
+// normalize_*에 cpu 개수를 곱해서 sysctl_*을 업데이트함
 static void update_sysctl(void)
 {
 	unsigned int factor = get_update_sysctl_factor();
@@ -280,6 +286,7 @@ static inline struct task_struct *task_of(struct sched_entity *se)
 }
 
 /* Walk up scheduling entities hierarchy */
+// before root 
 #define for_each_sched_entity(se) \
 		for (; se; se = se->parent)
 
@@ -365,19 +372,26 @@ find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 	 */
 
 	/* First walk up until both entities are at same depth */
+	// 두 엔티티의 depth를 구함.
 	se_depth = (*se)->depth;
 	pse_depth = (*pse)->depth;
 
+	// se의 depth가 더 깊다면 pse의 depth와 같아질때까지
+	// se 계층구조를 탐색하며 se를 갱신한다.
 	while (se_depth > pse_depth) {
 		se_depth--;
 		*se = parent_entity(*se);
 	}
 
+	// pse의 depth가 더 깊다면 se의 depth와 같아질때까지
+	// pse 계층구조를 탐색하며 pse를 갱신한다.
 	while (pse_depth > se_depth) {
 		pse_depth--;
 		*pse = parent_entity(*pse);
 	}
 
+	// 두 se가 같은 depth이지만..
+	// 같은 cfs 런큐에 enqueue되는 엔티티가 될때까지..
 	while (!is_same_group(*se, *pse)) {
 		*se = parent_entity(*se);
 		*pse = parent_entity(*pse);
@@ -618,19 +632,27 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
  * Scheduling class statistics methods:
  */
 
+// sysctl_*에 cpu 개수를 나눠서 normalized_*을 갱신함.
 int sched_proc_update_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp,
 		loff_t *ppos)
 {
 	int ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	// i.e) nr_cpus 4 ---> return 3
 	unsigned int factor = get_update_sysctl_factor();
 
 	if (ret || !write)
 		return ret;
 
+	// TBD. 이건 쓰지도 않는데 왜...
 	sched_nr_latency = DIV_ROUND_UP(sysctl_sched_latency,
 					sysctl_sched_min_granularity);
 
+/*
+* normalized_sysctl
+  _{sched_min_granularity, sched_latency, sched_wakeup_granularity}
+  을 업데이트함..
+*/
 #define WRT_SYSCTL(name) \
 	(normalized_sysctl_##name = sysctl_##name / (factor))
 	WRT_SYSCTL(sched_min_granularity);
@@ -667,19 +689,18 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
  *
  * p = (nr <= nl) ? l : l*nr/nl
  */
-// 런큐에 태스크가 sched_nr_latency 이상 존재한다면 실행주기를 nr_running을
-// 반영해서 더 길게 만든다.
-// 6ms or nr_running * 0.75ms
+// CFS 런큐의 태스크가 sched_nr_latency 이상 존재한다면 
+// 태스크 개수를 반영해서 스케줄링 레이턴시를 재조정한다.
+// ---->6ms*3 or nr_running * 0.75ms*3
 static u64 __sched_period(unsigned long nr_running)
 {
 	// sched_nr_latency = 8 or sysctl_sched_latency / sysctl_sched_min_granularity
 	// nr_running이 sched_nr_latency보다 크다면
-	// 보통 9개 이상의 태스크가 런큐에 있다면..
 	if (unlikely(nr_running > sched_nr_latency))
-		// nr_running * 0.75
+		// nr_running * 0.75*3
 		return nr_running * sysctl_sched_min_granularity;
 	else
-		// 6ms
+		// 6ms*3
 		return sysctl_sched_latency;
 }
 
@@ -691,39 +712,68 @@ static u64 __sched_period(unsigned long nr_running)
  *
  * s = p*P[w/rw]
  */
+// 타임슬라이스를 CFS 런큐마다 가지고 있는거 맞나?
 static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
-	// se포함한 cfs_rq의 태스크 갯수를 포함해서 실행주기를 구한다.
-	// 보통 6ms이지만 enqueue되어 있는 태스크갯수가 8개 이상이라면
-	// 태스크가 최소 0.75ms의 실행시간을 보장받을 수 없으므로
-	// 재조정한다.
+	// se를 포함한 cfs_rq의 태스크 갯수를 이용해서 실행주기를 구한다.
+	// 보통 6ms*3이지만 enqueue되어 있는 태스크갯수가 8개 이상이라면
+	// 태스크가 최소 0.75ms*3의 실행시간을 보장받을 수 없으므로 재조정한다.
+	// get scheduling latency of cfs 런큐
 	u64 slice = __sched_period(cfs_rq->nr_running + !se->on_rq);
 
 	// iterate like bottom-up
+	// TBD. 얘는 root 태스크그룹의 바로 밑 se까지만 반복하나???
+	// ---> yes
 	for_each_sched_entity(se) {
 		struct load_weight *load;
 		struct load_weight lw;
 
+		// get CFS런큐의 load weight
 		cfs_rq = cfs_rq_of(se);
+		// load는아래중 하나임..
+		// 1) cfs_rq->load
+		// 2) cfs_rq->load + se.load
 		load = &cfs_rq->load;
 
 		// 런큐에 enqueue안된 태스크는 반영해서 slice를 구함..
+		// 엔티티가 상위 CFS 런큐에 enqueue되지 않았다면
+		// (그게 태스크든, 그룹이든...)
 		if (unlikely(!se->on_rq)) {
+			// 상위 CFS 런큐의 load weight에 SE를 더한다.
 			lw = cfs_rq->load;
-
+			// 실제 cfs_rq의 load에는 반영안됨..??
 			update_load_add(&lw, se->load.weight);
+			// load는 se를 반영한 CFS런큐의 load weight을 가리키게 됨.
 			load = &lw;
 		}
-		//         se->load.weight
-		// slice * ---------------
-		//         cfs_rq's load
-		// 위와 같은 방식으로 slice를 변환해서 리턴함
+		//                     se->load.weight
+		// new slice = slice * ---------------
+		//                      cfs_rq's load
+
 		// vruntime을 계산했던것과는 조금 다름.
-		// 실행주기 slice를 내가 나눠가져야 하는데, 내가 속한 cfs_rq의 전체 load weight(내꺼를 포함한)
-		// 에서 내가 차지한 비율만큼의 slice를 계산하기 위해서임.
+		// 스케줄링 레이턴시를 구할 때, 내가 하위 SE라면...
+		// 최상위 관점에서 내 비율만큼을 챙겨가야 함..
 		// se 계층구조를 순회하면서 계속 slice를 구함..
+		// 타임슬라이스 128ms일때 각 태스크그룹의 타임슬라이스는..
+		//          root(nr7)
+		//        /          \
+		//       /            \
+		//     A(nr3)        B(nr4)
+		//   /       \      /      \
+		//  A1(nr1)A2(nr2)B1(nr2)B2(nr2)
+		//  /
+		// new A11
+		//
+		// 1) initial slice -> 128
+		// 2) se is A11 -> 64 -------------------> A1에서의 A11 엔티티의 ts
+		// 3) se is A1  -> 32 -------------------> A에서의 A11 엔티티의 ts
+		// 4) se is A   -> 16 -------------------> root 태스크 그룹에서의 A11 엔티티의 ts
 		slice = __calc_delta(slice, se->load.weight, load);
 	}
+	// se가 속한 계층구조에서의 타임슬라이스를 구함
+	// 자신이 속한 CFS 런큐뿐만 아니라 
+	// 자신이 태스크그룹에 속해있고 해당 태스크그룹이 계층구조를 가지고 있다면
+	// 더 작은 타임슬라이스를 가지게 됨..
 	return slice;
 }
 
@@ -2591,18 +2641,28 @@ static long calc_cfs_shares(struct cfs_rq *cfs_rq, struct task_group *tg)
 {
 	long tg_weight, load, shares;
 
+	// get cfs rq's load weight + load_avg - tg_load_avg_contrib
 	tg_weight = calc_tg_weight(tg, cfs_rq);
+	// get cfs rq's load weight
 	load = cfs_rq->load.weight;
 
+	/*
+	 *  tg->shares * cfs rq's load weight
+	 * -----------------------------------
+	 *           tg's weight
+	 */
 	shares = (tg->shares * load);
 	if (tg_weight)
 		shares /= tg_weight;
 
+	// shares가 2보다 작으면 2로 설정
 	if (shares < MIN_SHARES)
 		shares = MIN_SHARES;
+	// shares가 2^17보다 크면 2^17로 설정
 	if (shares > tg->shares)
 		shares = tg->shares;
 
+	// 재계산된 태스크그룹의 shares를 리턴함.
 	return shares;
 }
 # else /* CONFIG_SMP */
@@ -2621,6 +2681,8 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 		account_entity_dequeue(cfs_rq, se);
 	}
 
+	// 태스크 그룹의 se의 load 갱신...
+	// weight는 재계산된 shares가 설정됨...
 	update_load_set(&se->load, weight);
 
 	if (se->on_rq)
@@ -2635,7 +2697,7 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 	struct sched_entity *se;
 	long shares;
 
-	// CFS 런큐와 연관된 태스크 그룹을 구함
+	// CFS 런큐를 소유한 태스크 그룹을 구함
 	// CFS 런큐가 특정태스크그룹 소유라면 연관된 tg를 리턴
 	// CFS 런큐가 CPU의 소유라면 root task group을 리턴
 	tg = cfs_rq->tg;
@@ -2652,10 +2714,11 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 	if (likely(se->load.weight == tg->shares))
 		return;
 #endif
-	// ???
+	// shares를 재계산함.
 	shares = calc_cfs_shares(cfs_rq, tg);
 
-	// ???
+	// 태스크그룹이 enqueue될 cfs rq
+	// 태스크그룹의 cfs rq
 	reweight_entity(cfs_rq_of(se), se, shares);
 }
 #else /* CONFIG_FAIR_GROUP_SCHED */
@@ -3761,6 +3824,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 #endif
 
 	if (cfs_rq->nr_running > 1)
+		// 
 		check_preempt_tick(cfs_rq, curr);
 }
 
@@ -5682,6 +5746,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	int scale = cfs_rq->nr_running >= sched_nr_latency;
 	int next_buddy_marked = 0;
 
+	// current 태스크과 wake-up한 태스크가 동일하다면 리턴
 	if (unlikely(se == pse))
 		return;
 
@@ -5694,6 +5759,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
 		return;
 
+	// NEXT_BUDDY 스케줄링 피처는 
+	// 최근에 wake-up preemption에 실패한 태스크를 next 태스크로 먼저
+	// 선정하는 기능이다. 이 기능이 켜져 있고sched_nr_latency보다 적지 않은
+	// normal 태스크가 런큐에 존재하고, wake-up 선점이 갓 fork한 태스크를 위한 것이 아니라면
+	// wake-up된 태스크를 next 버디로 설정한다.
+	int scale = cfs_rq->nr_running >= sched_nr_latency;
 	if (sched_feat(NEXT_BUDDY) && scale && !(wake_flags & WF_FORK)) {
 		set_next_buddy(pse);
 		next_buddy_marked = 1;
@@ -5709,10 +5780,14 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * prevents us from potentially nominating it as a false LAST_BUDDY
 	 * below.
 	 */
+	// 이미 스케줄링 요청이 설정되어 있다면 더이상 진행하지 않고 함수를 종료한다.
+	// fork된 태스크의 wake-up 과정에서 이미 설정되어 있을 수도 있음.
 	if (test_tsk_need_resched(curr))
 		return;
 
 	/* Idle tasks are by definition preempted by non-idle tasks. */
+	// idle 스케줄링 정책을 사용하는 current 태스크는
+	// 다른 정책을 사용하는 모든 태스크가 선점할 수 있다.
 	if (unlikely(curr->policy == SCHED_IDLE) &&
 	    likely(p->policy != SCHED_IDLE))
 		goto preempt;
@@ -5721,12 +5796,26 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Batch and idle tasks do not preempt non-idle tasks (their preemption
 	 * is driven by the tick):
 	 */
+	// wake-up 한 태스크가 NORMAL이 아니거나 
+	// wake-up preemption 기능이 지원안되면 리턴한다.
 	if (unlikely(p->policy != SCHED_NORMAL) || !sched_feat(WAKEUP_PREEMPTION))
 		return;
 
+	// 두 태스크의 se가 같은 depth, 같은 cfs rq에 enqueue되도록
+	// entity 계층그주롤 탐색해서 se, pse를 갱신함..
 	find_matching_se(&se, &pse);
+	// cfs 런큐의 current se의 아래필드를 갱신함.
+	// 1. exec_start = rq->clock_task
+	// 2. sum_exec_runtime += delta
+	// 3. vruntime += weighted delta
+	// CFS 런큐의 min_vruntime 갱신
 	update_curr(cfs_rq_of(se));
 	BUG_ON(!pse);
+	// current-se's vruntime - se's vruntime > weighted wakeup granurarity
+	// se의 load weight을 가중치로 wakeup granurarity보다 
+	// curr's vruntime - pse's vruntime이 크다면
+	// 선점하도록 한다.
+	// 해당 se가 꼭 다음에 실행되도록 next buddy로 설정한다.
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
 		 * Bias pick_next to pick the sched entity that is
@@ -8547,6 +8636,7 @@ static void task_fork_fair(struct task_struct *p)
 	// update clock, clock_task
 	update_rq_clock(rq);
 
+	// 이미 current가 있는데 curr을 또 구하는 이유는 멀까...
 	// get cfs rq of current task
 	cfs_rq = task_cfs_rq(current);
 	// get current task of cfs rq
@@ -8841,6 +8931,11 @@ void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 	if (!se)
 		return;
 
+// TBD. se가 NULL이 아닌데 parent가 null인 경우가 있냐...
+// 전달된 se가 없다는건 root task group이고
+// 전달된 parent가 없다는것 역시 root task group인데.... 이게 se가 있는 조건에서 검사하는게
+// 무슨 의미이지..
+// se가 있는데 parent가 없는 경우는 없는 case아닌가??
 	if (!parent) {
 		se->cfs_rq = &rq->cfs;
 		se->depth = 0;
@@ -8865,27 +8960,37 @@ int sched_group_set_shares(struct task_group *tg, unsigned long shares)
 	/*
 	 * We can't change the weight of the root cgroup.
 	 */
+	// root 태스크그룹인 경우는 share를 바꿀 수 없으므로 -EINVAL리턴..
 	if (!tg->se[0])
 		return -EINVAL;
 
+	// clamp shares 2^1 ~ 2^17
 	shares = clamp(shares, scale_load(MIN_SHARES), scale_load(MAX_SHARES));
 
 	mutex_lock(&shares_mutex);
+	// 기존 값과 동일하다면 exit
 	if (tg->shares == shares)
 		goto done;
 
+	// set new shares
 	tg->shares = shares;
+	// all possible cpu를 탐색한다.
 	for_each_possible_cpu(i) {
+		// cpu i의 rq
 		struct rq *rq = cpu_rq(i);
 		struct sched_entity *se;
 
+		// cpu i에 enqueue될 때 사용되는 태스크 그룹의 entity
 		se = tg->se[i];
 		/* Propagate contribution to hierarchy */
 		raw_spin_lock_irqsave(&rq->lock, flags);
 
 		/* Possible calls to update_curr() need rq clock */
 		update_rq_clock(rq);
+		// 엔티티 계층구조를 탐색
 		for_each_sched_entity(se)
+			// 1. get owned cfs rq
+			// 2.
 			update_cfs_shares(group_cfs_rq(se));
 		raw_spin_unlock_irqrestore(&rq->lock, flags);
 	}

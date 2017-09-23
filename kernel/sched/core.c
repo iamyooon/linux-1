@@ -916,12 +916,18 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 	const struct sched_class *class;
 
 	if (p->sched_class == rq->curr->sched_class) {
+		// 둘이 우선순위가 같다면 
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
 	} else {
 		for_each_class(class) {
+			// 런큐의 current 태스크보다 높은 우선순위의 태스크
+			// 가 없다는 것이므로 더이상 체크안함.
 			if (class == rq->curr->sched_class)
 				break;
+			// 런큐의 current 태스크보다 p가 더 높은 우선순위를
+			// 가지고 있음. 선점가능함.
 			if (class == p->sched_class) {
+				// 플래그 설정함.
 				resched_curr(rq);
 				break;
 			}
@@ -1222,6 +1228,8 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 		perf_event_task_migrate(p);
 	}
 
+	// TBD. task_fork_fair()에서도 하고 있음..
+	// 여기서 하니까 task_fork_fair()에서 안해도 되지 않을까?
 	__set_task_cpu(p, new_cpu);
 }
 
@@ -3198,30 +3206,43 @@ again:
  * __schedule() is the main scheduler function.
  *
  * The main means of driving the scheduler and thus entering this function are:
+ 이 함수를 진입하는 방법은 아래와 같음.
  *
  *   1. Explicit blocking: mutex, semaphore, waitqueue, etc.
+ 명시적인 태스크의 블러킹진입 - mutex, semaphore, waitqueue
  *
  *   2. TIF_NEED_RESCHED flag is checked on interrupt and userspace return
  *      paths. For example, see arch/x86/entry_64.S.
+ TIF_NEED_RESCHED 플래그가 인터럽트처리후나 유저스페이스로 리턴하기 전 패스에서 
+ 체크된 경우...
  *
  *      To drive preemption between tasks, the scheduler sets the flag in timer
  *      interrupt handler scheduler_tick().
+ 태스크들간의 선점을 수행하기 위해, scheduler_tick()에서 플래그를 설정한다.
  *
  *   3. Wakeups don't really cause entry into schedule(). They add a
  *      task to the run-queue and that's it.
+ wakeup이 schedule()을 유발하지는 않음. 단순히 런큐에 추가될뿐..
  *
  *      Now, if the new task added to the run-queue preempts the current
  *      task, then the wakeup sets TIF_NEED_RESCHED and schedule() gets
  *      called on the nearest possible occasion:
+런큐에 추가된 태스크가 현재 태스크를 선점한다면
+wakupe루틴은 TIF_NEED_RESCHED를 설정하고 schedule()은 곧 호출된다.
  *
  *       - If the kernel is preemptible (CONFIG_PREEMPT=y):
+ 커널이 선점가능하다면...
  *
  *         - in syscall or exception context, at the next outmost
  *           preempt_enable(). (this might be as soon as the wake_up()'s
  *           spin_unlock()!)
+ syscall, 익셉션처리에서,
+ 다음 preempt_enable()에서 호출됨.
  *
  *         - in IRQ context, return from interrupt-handler to
  *           preemptible context
+ irq context에서,
+ 핸들러 처리후 
  *
  *       - If the kernel is not preemptible (CONFIG_PREEMPT is not set)
  *         then at the next:
@@ -3240,19 +3261,26 @@ static void __sched notrace __schedule(bool preempt)
 	struct rq *rq;
 	int cpu;
 
+	// get this cpu
 	cpu = smp_processor_id();
+	// get rq of this cpu
 	rq = cpu_rq(cpu);
+	// get prev task aka current task
 	prev = rq->curr;
 
 	/*
 	 * do_exit() calls schedule() with preemption disabled as an exception;
 	 * however we must fix that up, otherwise the next task will see an
 	 * inconsistent (higher) preempt count.
+	 예외적으로, do_exit()에서 선점을 비활성화한 상태로 schedule()을 호출함.
+	 예외상황이므로 이걸 바로 잡아야 함, 그렇지 않으면 다음 태스크가
+	 inconsisten preemption count를 보게 됨??
 	 *
 	 * It also avoids the below schedule_debug() test from complaining
 	 * about this.
 	 */
 	if (unlikely(prev->state == TASK_DEAD))
+		// dec preemption cnt
 		preempt_enable_no_resched_notrace();
 
 	schedule_debug(prev);
@@ -3260,6 +3288,7 @@ static void __sched notrace __schedule(bool preempt)
 	if (sched_feat(HRTICK))
 		hrtick_clear(rq);
 
+	// disable irQ
 	local_irq_disable();
 	rcu_note_context_switch();
 
@@ -3275,11 +3304,23 @@ static void __sched notrace __schedule(bool preempt)
 	rq->clock_skip_update <<= 1; /* promote REQ to ACT */
 
 	switch_count = &prev->nivcsw;
+	// ??? && !TASK_RUNNING 
 	if (!preempt && prev->state) {
+		// 아래 조건중 하나라도 만족할경우 거짓을 리턴
+		// 1) task is not in TASK_INTERRUPTIBLE or TASK_WAKEKILL
+		// 2) no signal is pending
+		// 아래 조건중 하나라도 만족할경우 참을 리턴
+		// 1) TASK_INTERRUPTIBLE && signal is pending
+		// 2) SIGKILL is pending
+		// 처리할 시그널이 있다면....
 		if (unlikely(signal_pending_state(prev->state, prev))) {
+			// 태스크의 상태를 TASK_RUNNING으로 변경, 왜??
 			prev->state = TASK_RUNNING;
+		// prev가 처리할 시그널이 없으므로 deactive
 		} else {
+			// 태스크를 dequeue해서 sleep 시키고..
 			deactivate_task(rq, prev, DEQUEUE_SLEEP);
+			// rq에서 뺐음을 표시...
 			prev->on_rq = 0;
 
 			/*
@@ -3324,6 +3365,7 @@ STACK_FRAME_NON_STANDARD(__schedule); /* switch_to() */
 
 static inline void sched_submit_work(struct task_struct *tsk)
 {
+	// !TASK_RUNNING or pi blocked
 	if (!tsk->state || tsk_is_pi_blocked(tsk))
 		return;
 	/*
@@ -3340,6 +3382,8 @@ asmlinkage __visible void __sched schedule(void)
 
 	sched_submit_work(tsk);
 	do {
+		// inc preemption count
+		// from now, cant preemption
 		preempt_disable();
 		__schedule(false);
 		sched_preempt_enable_no_resched();
@@ -3378,6 +3422,9 @@ void __sched schedule_preempt_disabled(void)
 	preempt_disable();
 }
 
+// preempt 활성화 할때 호출될텐데..
+// current가 명시적으로 preempt disable하다가 지 할일 다하고 preempt를 다시 활성화했는데
+// 먼지 모르겠지만 스케줄링 요청이 왔어... 머 리모트에서 왔을수도 있으니...
 static void __sched notrace preempt_schedule_common(void)
 {
 	do {
@@ -3457,6 +3504,9 @@ EXPORT_SYMBOL_GPL(preempt_schedule_notrace);
  * Note, that this is called and return with irqs disabled. This will
  * protect us against recursive calling from irq.
  */
+// 커널코드 실행중에 인터럽트가 발생했고...
+// 마침 선점도 가능했고, 스케줄링 요청도 있었을때임...
+// current는 dequeue되지 않을거고...빠르게 next 태스크도 선택가능함..
 asmlinkage __visible void __sched preempt_schedule_irq(void)
 {
 	enum ctx_state prev_state;
