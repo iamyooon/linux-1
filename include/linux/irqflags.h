@@ -136,6 +136,8 @@
  * to avoid build issues.
  */
 #ifdef CONFIG_TRACE_IRQFLAGS_SUPPORT
+// 1. get current irq enable state
+// 2. check PSR_I_BIT is set(disabled)
 #define irqs_disabled()					\
 	({						\
 		unsigned long _flags;			\

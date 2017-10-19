@@ -376,8 +376,10 @@ static bool set_nr_if_polling(struct task_struct *p)
 }
 
 #else
+// set TIF_NEED_RESCHED
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
+	// set TIF_NEED_RESCHED
 	set_tsk_need_resched(p);
 	return true;
 }
@@ -443,6 +445,9 @@ void wake_up_q(struct wake_q_head *head)
  * might also involve a cross-CPU call to trigger the scheduler on
  * the target CPU.
  */
+// rq_of(rq)의 cpu가 리스케쥴링되게 하기 위해
+// this cpu라면 current 태스크에 TI_NEED_RESCHED 플래그를 설정
+// remote cpu라면 IPI_RESCHEDULE 인터럽트를 보내서 리스케쥴링을 요청함.
 void resched_curr(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
@@ -450,18 +455,25 @@ void resched_curr(struct rq *rq)
 
 	lockdep_assert_held(&rq->lock);
 
+	// 이미 설정되어 있다면 리턴..
 	if (test_tsk_need_resched(curr))
 		return;
 
 	cpu = cpu_of(rq);
 
+// 리스케쥴링을 시도할 cpu가 current cpu라면..
 	if (cpu == smp_processor_id()) {
+		// set TIF_NEED_RESCHED to current 태스크
 		set_tsk_need_resched(curr);
 		set_preempt_need_resched();
 		return;
 	}
 
+// 리스케쥴링을 시도할 cpu가 remote cpu라면..
+	// set TIF_NEED_RESCHED
 	if (set_nr_and_not_polling(curr))
+		// IPI_RESCHEDULE 인터럽트를 발생시켜 remote cpu가
+		// 리스케쥴링하도록 함..
 		smp_send_reschedule(cpu);
 	else
 		trace_sched_wake_idle_without_ipi(cpu);
@@ -718,6 +730,7 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	update_rq_clock(rq);
 	if (!(flags & ENQUEUE_RESTORE))
 		sched_info_queued(rq, p);
+	// 태스크를 enqueue함..
 	p->sched_class->enqueue_task(rq, p, flags);
 }
 
@@ -729,16 +742,26 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	p->sched_class->dequeue_task(rq, p, flags);
 }
 
+// 1) 태스크가 uninterruptible 상태여서 cpu에 로드를 주고 있는 상태라면
+// nr_uninterruptible --
+// 2) 태스크 enqueue
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	// 태스크가 uninterruptible 상태이거나 TASK_NOLOAD 상태가 아니고
+	// PF_FROZEN 플래그를 안썼다면 태스크는 cpu에 로드를 주고 있는 상태임.
+	// nr_uninterruptible --
 	if (task_contributes_to_load(p))
 		rq->nr_uninterruptible--;
 
+	// task enqueue
 	enqueue_task(rq, p, flags);
 }
 
 void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	// uninterruptible인데 pf_frozen, task_noload플래그가 없다면
+	// 로드를 가진 태스크로 봐야함. 이 태스크는 로드를 가진 태스크이므로
+	// 태스크의 런큐는 로드보전을 위해 별도로 관리해야 함.
 	if (task_contributes_to_load(p))
 		rq->nr_uninterruptible++;
 
@@ -935,17 +958,47 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 		p->sched_class->prio_changed(rq, p, oldprio);
 }
 
+// @rq의 current 태스크를 선점할 수 있는지 두 경올 나눠서 체크한다. 
+// 1) 런큐의 current 태스크와 새 태스크의 스케쥴링정책이 같다면..
+//  인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+//  아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+//  1) current 태스크가 idle thread && p가 !idle thread
+//  2) current 태스크가 !idle thread && sysctl_sched_wakeup_granularity보다 더 실행됨
+//
+// 2) 선점될 current 태스크와 새 태스크의 정책이 다르다면..
+//  current 태스크의 정책보다 새로운 태스크의 정책의 우선순위가 더 클 경우에만
+//  resched_curr()을 호출해서 리스케쥴링되도록 설정한다.
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	const struct sched_class *class;
 
+	// 런큐의 current 태스크와 새 태스크의 스케쥴링정책이 같다면..
 	if (p->sched_class == rq->curr->sched_class) {
+		// 인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+		// 아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+		// 1) current 태스크가 idle thread && p가 !idle thread
+		// 2) current 태스크가 !idle thread && 
+		//		sysctl_sched_wakeup_granularity보다 더 실행됨
+		//
+		// 리스케쥴링 해야 할 cpu가 this cpu라면 current 태스크에 
+		// TIF_NEED_RESCHED플래그를 설정
+		// remote cpu라면 IPI_RESCHEDULE 인터럽트를 발생시켜 
+		// 리스케쥴링을 요청한다.
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
+	// 선점될 current 태스크와 새 태스크의 정책이 다르다면..
 	} else {
+		// 시스템의 모든 스케쥴링 정책을 돌며..
 		for_each_class(class) {
+			// current 태스크의 정책일 경우는 루프를 종료
+			// 이 얘기는 cureent 태스크의 정책보다 우선순위가
+			// 높은 클래스에 속한 새 태스크일 경우에만 리스케쥴링하겠다는것
 			if (class == rq->curr->sched_class)
 				break;
+			// 새 태스크의 스케쥴링클래스와 동일하다면..
 			if (class == p->sched_class) {
+// rq_of(rq)의 cpu가 리스케쥴링되게 하기 위해
+// this cpu라면 current 태스크에 TI_NEED_RESCHED 플래그를 설정
+// remote cpu라면 IPI_RESCHEDULE 인터럽트를 보내서 리스케쥴링을 요청함.
 				resched_curr(rq);
 				break;
 			}
@@ -1628,9 +1681,16 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
 #endif /* CONFIG_SCHEDSTATS */
 }
 
+// 1) 태스크가 uninterruptible 상태여서 cpu에 로드를 주고 있는 상태라면
+// nr_uninterruptible --
+// 2) 태스크 enqueue하고 enqueue되었음을 표시(p->on = TASK_ON_RQ_QUEUED
 static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_flags)
 {
+	// 1) 태스크가 uninterruptible 상태여서 cpu에 로드를 주고 있는 상태라면
+	// nr_uninterruptible --
+	// 2) 태스크 enqueue
 	activate_task(rq, p, en_flags);
+	// 태스크가 enqueue되었음을 표시함..
 	p->on_rq = TASK_ON_RQ_QUEUED;
 
 	/* if a worker is waking up, notify workqueue */
@@ -1644,7 +1704,18 @@ static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_fl
 static void
 ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
+// @rq의 current 태스크를 선점할 수 있는지 두 경올 나눠서 체크한다. 
+// 1) 런큐의 current 태스크와 새 태스크의 스케쥴링정책이 같다면..
+//  인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+//  아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+//  1) current 태스크가 idle thread && p가 !idle thread
+//  2) current 태스크가 !idle thread && sysctl_sched_wakeup_granularity보다 더 실행됨
+//
+// 2) 선점될 current 태스크와 새 태스크의 정책이 다르다면..
+//  current 태스크의 정책보다 새로운 태스크의 정책의 우선순위가 더 클 경우에만
+//  resched_curr()을 호출해서 리스케쥴링되도록 설정한다.
 	check_preempt_curr(rq, p, wake_flags);
+	// 태스크의 상태를 RUNNING으로 변경
 	p->state = TASK_RUNNING;
 	trace_sched_wakeup(p);
 
@@ -1673,17 +1744,35 @@ ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 #endif
 }
 
+// 1) 태스크가 런큐의 로드에 기여하고 있다면 nr_uninterruptible을 감소시킴
+// 2) current 태스크를 선점할 수 있다면 리스케쥴링가능하도록 설정한다.
 static void
 ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	lockdep_assert_held(&rq->lock);
 
 #ifdef CONFIG_SMP
+	// 태스크가 uninterruptible상태이고 freeze안되어 있으며(!PF_FROZEN)
+	// TASK_NOLOAD 상태가 아닐 경우...
+	// 얘가 uninterruptible에서 running이 될것이므로...
 	if (p->sched_contributes_to_load)
 		rq->nr_uninterruptible--;
 #endif
 
+	// 1) 태스크가 uninterruptible 상태여서 cpu에 로드를 주고 있는 상태라면
+	// nr_uninterruptible --
+	// 2) 태스크 enqueue하고 enqueue되었음을 표시(p->on = TASK_ON_RQ_QUEUED
 	ttwu_activate(rq, p, ENQUEUE_WAKEUP | ENQUEUE_WAKING);
+// @rq의 current 태스크를 선점할 수 있는지 두 경올 나눠서 체크한다. 
+// 1) 런큐의 current 태스크와 새 태스크의 스케쥴링정책이 같다면..
+//  인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+//  아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+//  1) current 태스크가 idle thread && p가 !idle thread
+//  2) current 태스크가 !idle thread && sysctl_sched_wakeup_granularity보다 더 실행됨
+//
+// 2) 선점될 current 태스크와 새 태스크의 정책이 다르다면..
+//  current 태스크의 정책보다 새로운 태스크의 정책의 우선순위가 더 클 경우에만
+//  resched_curr()을 호출해서 리스케쥴링되도록 설정한다.
 	ttwu_do_wakeup(rq, p, wake_flags);
 }
 
@@ -1702,6 +1791,16 @@ static int ttwu_remote(struct task_struct *p, int wake_flags)
 	if (task_on_rq_queued(p)) {
 		/* check_preempt_curr() may use rq clock */
 		update_rq_clock(rq);
+// @rq의 current 태스크를 선점할 수 있는지 두 경올 나눠서 체크한다. 
+// 1) 런큐의 current 태스크와 새 태스크의 스케쥴링정책이 같다면..
+//  인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+//  아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+//  1) current 태스크가 idle thread && p가 !idle thread
+//  2) current 태스크가 !idle thread && sysctl_sched_wakeup_granularity보다 더 실행됨
+//
+// 2) 선점될 current 태스크와 새 태스크의 정책이 다르다면..
+//  current 태스크의 정책보다 새로운 태스크의 정책의 우선순위가 더 클 경우에만
+//  resched_curr()을 호출해서 리스케쥴링되도록 설정한다.
 		ttwu_do_wakeup(rq, p, wake_flags);
 		ret = 1;
 	}
@@ -1772,12 +1871,18 @@ void scheduler_ipi(void)
 	irq_exit();
 }
 
+// 태스크를 remote cpu의 wake_list에 연결시켜놓는다.
+// 리스트에 아무태스크도 없다면..
+// IPI를 통해 remote cpu가 resched 될 수 있게한다.
 static void ttwu_queue_remote(struct task_struct *p, int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
 
+	// 태스크를 remote cpu의 wake_list에 연결시켜놓는다.
+	// 리스트에 아무태스크도 없다면..
 	if (llist_add(&p->wake_entry, &cpu_rq(cpu)->wake_list)) {
 		if (!set_nr_if_polling(rq->idle))
+			// IPI를 통해 remote cpu가 resched 될 수 있게한다.
 			smp_send_reschedule(cpu);
 		else
 			trace_sched_wake_idle_without_ipi(cpu);
@@ -1814,20 +1919,29 @@ bool cpus_share_cache(int this_cpu, int that_cpu)
 }
 #endif /* CONFIG_SMP */
 
+// 태스크를 @cpu에 enqueue하고 필요하다면 리스케쥴링될 수 있게 한다.
 static void ttwu_queue(struct task_struct *p, int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
 
 #if defined(CONFIG_SMP)
+	// remote cpu에서 태스크를 wakeup하는 기능이 있고.. 
+	// current cpu와 cpu간에 캐시를 공유하지 않는다면..
 	if (sched_feat(TTWU_QUEUE) && !cpus_share_cache(smp_processor_id(), cpu)) {
 		sched_clock_cpu(cpu); /* sync clocks x-cpu */
+		// 태스크를 remote cpu의 wake_list에 연결시켜놓는다.
+		// 리스트에 아무태스크도 없다면..
+		// IPI를 통해 remote cpu가 resched 될 수 있게한다.
 		ttwu_queue_remote(p, cpu);
 		return;
 	}
 #endif
 
+// queue local cpu
 	raw_spin_lock(&rq->lock);
 	lockdep_pin_lock(&rq->lock);
+	// 1) 태스크가 런큐의 로드에 기여하고 있다면 nr_uninterruptible을 감소시킴
+	// 2) current 태스크를 선점할 수 있다면 리스케쥴링가능하도록 설정한다.
 	ttwu_do_activate(rq, p, 0);
 	lockdep_unpin_lock(&rq->lock);
 	raw_spin_unlock(&rq->lock);
@@ -1953,6 +2067,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	smp_mb__before_spinlock();
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
+	// 인자로 전달된 state를 포함하는 실행상태가 아니라면
+	// wakeup할 상황이 아니므로 작업을 중지한다.
+	// TASK_NORMAL이 전달될 경우 태스크의 상태가 interruptible,
+	// uninterruptible 둘중 하나일 경우만 wakeup을 진행한다.
 	if (!(p->state & state))
 		goto out;
 
@@ -1961,6 +2079,8 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	success = 1; /* we're going to change ->state */
 	cpu = task_cpu(p);
 
+	// 태스크가 여전히 런큐에 있고
+	// remote wakeup에 성공하면 goto stat
 	if (p->on_rq && ttwu_remote(p, wake_flags))
 		goto stat;
 
@@ -1995,19 +2115,32 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	smp_cond_acquire(!p->on_cpu);
 
+	// 태스크가 uninterruptible 상태이거나 TASK_NOLOAD 상태가 아니고
+	// PF_FROZEN 플래그를 안썼다면 태스크는 cpu에 로드를 주고 있는 상태임.
 	p->sched_contributes_to_load = !!task_contributes_to_load(p);
+	// TASK_WAKING 상태로 설정함.
 	p->state = TASK_WAKING;
 
 	if (p->sched_class->task_waking)
 		p->sched_class->task_waking(p);
 
+	// 태스크가 실행될 cpu를 선택한다.
+	// passive load balancing
+	//
 	cpu = select_task_rq(p, p->wake_cpu, SD_BALANCE_WAKE, wake_flags);
+	// 새로운 cpu로 실행한다면...
 	if (task_cpu(p) != cpu) {
+		// 통계정보에 사용할 WF_MIGRATE플래그를 설정...
 		wake_flags |= WF_MIGRATED;
+		// 새로운 cpu에서 실행될 수 있게 설정함.
+		// p->se.cfs_rq, p->se.parent
+		// thread_info->cpu, p->wake_cpu
 		set_task_cpu(p, cpu);
 	}
 #endif /* CONFIG_SMP */
 
+	// 태스크를 @cpu에 enqueue하고 필요하다면 리스케쥴링될 수 있게 한다.
+	//ttwu_queue와 ttwu_remote의 차이는 멀까?
 	ttwu_queue(p, cpu);
 stat:
 	if (schedstat_enabled())
@@ -2602,6 +2735,8 @@ fire_sched_out_preempt_notifiers(struct task_struct *curr,
  * This is called with the rq lock held and interrupts off. It must
  * be paired with a subsequent finish_task_switch after the context
  * switch.
+ 이 함수는 런큐의 락을 잡은 상태에서 인터럽트를 끄고 호출됨.
+ finish_task_switch()와 짝이다.
  *
  * prepare_task_switch sets up locking and calls architecture specific
  * hooks.
@@ -2613,8 +2748,8 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 	sched_info_switch(rq, prev, next);
 	perf_event_task_sched_out(prev, next);
 	fire_sched_out_preempt_notifiers(prev, next);
+	// next->on_cpu = 1
 	prepare_lock_switch(rq, next);
-	prepare_arch_switch(next);
 }
 
 /**
@@ -2636,10 +2771,16 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
  * past. prev == current is still correct but we need to recalculate this_rq
  * because prev may have moved to another CPU.
  */
+// prev가 사용했던 mm(rq->prev_mm)에 대한 참조카운트를 감소시킴.
+// 필요할 경우 mm을 drop함.
+// prev가 종료중인 태스크라면 
+// put signal structure
+// put task_struct, thread_info
 static struct rq *finish_task_switch(struct task_struct *prev)
 	__releases(rq->lock)
 {
 	struct rq *rq = this_rq();
+	// 여기에서 쓸려고 백업한거임..
 	struct mm_struct *mm = rq->prev_mm;
 	long prev_state;
 
@@ -2659,6 +2800,7 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		      current->comm, current->pid, preempt_count()))
 		preempt_count_set(FORK_PREEMPT_COUNT);
 
+	// 백업했으니 초기화...
 	rq->prev_mm = NULL;
 
 	/*
@@ -2679,8 +2821,11 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 	finish_arch_post_lock_switch();
 
 	fire_sched_in_preempt_notifiers(current);
+	// prev가 사용했던 mm(rq->prev_mm)에 대한 참조카운트를 감소시킴.
+	// 필요할 경우 mm을 drop함.
 	if (mm)
 		mmdrop(mm);
+	// prev가 종료중인 태스크라면 
 	if (unlikely(prev_state == TASK_DEAD)) {
 		if (prev->sched_class->task_dead)
 			prev->sched_class->task_dead(prev);
@@ -2690,6 +2835,8 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		 * task and put them back on the free list.
 		 */
 		kprobe_flush_task(prev);
+		// put signal structure
+		// put task_struct, thread_info
 		put_task_struct(prev);
 	}
 
@@ -2763,12 +2910,28 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 /*
  * context_switch - switch to the new MM and the new thread's register state.
  */
+// next->on_cpu = 1
+// next가 커널스레드라면..
+// 커널스레드가 사용할 어드레스 스페이스를 prev의 active_mm을 사용..
+// 커널스레드가 사용할것이므로 참조카운트 증가 
+// 유저 프로세스라면..
+// 1.init_mm인 경우 TTBR0만 zero page를 가리키도록 설정함.
+// 2.next 태스크의 asid를 구해서 active_asids에 설정함.
+// 3.새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
+// prev 태스크가 커널스레드라면..
+// prev가 사용한 active_mm을 NULL로 초기화...
+// 런큐의 prev_mm에 oldmm을 설정함.
+// register set을 스위칭함. 
+// prev의 register 정보는 prev의 thread_struct의 cpu_context 구조체에 백업
+// next의 register 정보는 cpu_context 구조체에서 register로 복원함.
+// stack pointer를 가리키는 sp_el0가 next의 stack을 가리키도록 설정함.
 static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next)
 {
 	struct mm_struct *mm, *oldmm;
 
+	// next->on_cpu = 1
 	prepare_task_switch(rq, prev, next);
 
 	mm = next->mm;
@@ -2780,15 +2943,25 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 */
 	arch_start_context_switch(prev);
 
+	// next가 커널스레드라면..
 	if (!mm) {
+		// 커널스레드가 사용할 어드레스 스페이스를 prev의 active_mm을 사용..
 		next->active_mm = oldmm;
+		// 커널스레드가 사용할것이므로 참조카운트 증가 
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
+	// 유저 프로세스라면..
 	} else
+		// 1.init_mm인 경우 TTBR0만 zero page를 가리키도록 설정함.
+		// 2.next 태스크의 asid를 구해서 active_asids에 설정함.
+		// 3.새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
 		switch_mm(oldmm, mm, next);
 
+	// prev 태스크가 커널스레드라면..
 	if (!prev->mm) {
+		// prev가 사용한 active_mm을 NULL로 초기화...
 		prev->active_mm = NULL;
+		// 런큐의 prev_mm에 oldmm을 설정함.
 		rq->prev_mm = oldmm;
 	}
 	/*
@@ -2801,9 +2974,18 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
 
 	/* Here we just switch the register state and the stack. */
+	// register set을 스위칭함. 
+	// prev의 register 정보는 prev의 thread_struct의 cpu_context 구조체에 백업
+	// next의 register 정보는 cpu_context 구조체에서 register로 복원함.
+	// stack pointer를 가리키는 sp_el0가 next의 stack을 가리키도록 설정함.
 	switch_to(prev, next, prev);
 	barrier();
 
+	// prev가 사용했던 mm(rq->prev_mm)에 대한 참조카운트를 감소시킴.
+	// 필요할 경우 mm을 drop함.
+	// prev가 종료중인 태스크라면 
+	// 1.put signal structure
+	// 2.put task_struct, thread_info
 	return finish_task_switch(prev);
 }
 
@@ -3102,6 +3284,7 @@ static inline void schedule_debug(struct task_struct *prev)
 	BUG_ON(task_stack_end_corrupted(prev));
 #endif
 
+	// 그럴리가 없지만, preempt_count
 	if (unlikely(in_atomic_preempt_off())) {
 		__schedule_bug(prev);
 		preempt_count_set(PREEMPT_DISABLED);
@@ -3156,38 +3339,57 @@ again:
  * __schedule() is the main scheduler function.
  *
  * The main means of driving the scheduler and thus entering this function are:
+스케쥴러를 구동하는 주요방법인 이 함수를 진입하는 경우는 아래와 같다.
  *
  *   1. Explicit blocking: mutex, semaphore, waitqueue, etc.
+     1. 명시적인 블러킹 : mutex, semaphorre, waitqueue, etc
  *
  *   2. TIF_NEED_RESCHED flag is checked on interrupt and userspace return
  *      paths. For example, see arch/x86/entry_64.S.
  *
  *      To drive preemption between tasks, the scheduler sets the flag in timer
  *      interrupt handler scheduler_tick().
+     2. TIF_NEED_RESCHED 플래그가 설정된 것을 인터럽트 리턴, 유저스페이스 리턴
+     구간에서 확인한 경우..
+     태스크들 간의 선점을 수행하기 위해, 스케쥴러는 타이머 인터럽트 핸들러인
+     scheduler_tick()에서 이 플래그를 설정함.
  *
  *   3. Wakeups don't really cause entry into schedule(). They add a
  *      task to the run-queue and that's it.
+     3. 태스크 wakeup은 schedule()을 호출하진 않고 런큐에 태스크를 넣을뿐임.
  *
  *      Now, if the new task added to the run-queue preempts the current
  *      task, then the wakeup sets TIF_NEED_RESCHED and schedule() gets
  *      called on the nearest possible occasion:
+        런큐에 추가된 새 태스크가 현재 태스크를 선점한다면,
+	wakeup은 TIF_NEED_RESCHED를 설정하고 가능한한 가까운 시점에
+	schedule()이 불린다.
  *
  *       - If the kernel is preemptible (CONFIG_PREEMPT=y):
+ 	   커널이 선점가능하다면
  *
  *         - in syscall or exception context, at the next outmost
  *           preempt_enable(). (this might be as soon as the wake_up()'s
  *           spin_unlock()!)
+	     syscall, exception context에서 다음 preempt_enable()에 의해 호출됨.
+	     wake_up()의 spin_unlock()에서 schedule()이 불림.
  *
  *         - in IRQ context, return from interrupt-handler to
  *           preemptible context
+ 	     IRQ 컨텍스트에서, 인터럽트핸들러에서 preemptible context로
+	     전환할 때 schedule()이 불림.
  *
  *       - If the kernel is not preemptible (CONFIG_PREEMPT is not set)
  *         then at the next:
+ 	   커널이 선점가능하지 않으면
  *
  *          - cond_resched() call
  *          - explicit schedule() call
  *          - return from syscall or exception to user-space
  *          - return from interrupt-handler to user-space
+ 		cond_resched(), schedule()이 호출될 때
+		syscall, exception을 처리하고 유저스페이스로 돌아갈때
+		인터럽트 핸들러에서 유저스페이스로 돌아갈때
  *
  * WARNING: must be called with preemption disabled!
  */
@@ -3209,15 +3411,21 @@ static void __sched notrace __schedule(bool preempt)
 	 *
 	 * It also avoids the below schedule_debug() test from complaining
 	 * about this.
+	 do_exit()은 선점이 비활성화된 상태로 schedule()을 호출한다.
+
 	 */
+	// 태스크가 종료중이라면 선점이 비활성화되어 있으므로
+	// 선점을 다시 활성화해줌..preempt_count -= 1
 	if (unlikely(prev->state == TASK_DEAD))
 		preempt_enable_no_resched_notrace();
 
 	schedule_debug(prev);
 
+	// feature.h에 false되어 있음.
 	if (sched_feat(HRTICK))
 		hrtick_clear(rq);
 
+	// irq disable
 	local_irq_disable();
 	rcu_note_context_switch();
 
@@ -3233,11 +3441,21 @@ static void __sched notrace __schedule(bool preempt)
 	rq->clock_skip_update <<= 1; /* promote REQ to ACT */
 
 	switch_count = &prev->nivcsw;
+	// current's state is not TASK_RUNNING
 	if (!preempt && prev->state) {
+		// 아래 경우에 참을 리턴함.
+		// 1. return true state is INTERRUPTIBLE
+		// 2. SIGKILL is set as pending signal.
 		if (unlikely(signal_pending_state(prev->state, prev))) {
+			// TASK_RUNNING이 아닌 태스크지만
+			// interruptible이거나 wakekill이고 
+			// pending signal이 있으므로 시그널처리를 위해
+			// running state로 바꾸자..
 			prev->state = TASK_RUNNING;
 		} else {
+			// task를 dequeue 함.
 			deactivate_task(rq, prev, DEQUEUE_SLEEP);
+			// queue에 없음을 표시
 			prev->on_rq = 0;
 
 			/*
@@ -3256,21 +3474,32 @@ static void __sched notrace __schedule(bool preempt)
 		switch_count = &prev->nvcsw;
 	}
 
+	// task on queue?
 	if (task_on_rq_queued(prev))
 		update_rq_clock(rq);
 
+	// vruntime이 짧은 태스크 선택, prev가 다시 선택될 수도 있음.
 	next = pick_next_task(rq, prev);
+	// prev's TIF_NEED_RESCHED clear
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 	rq->clock_skip_update = 0;
 
+	// 새로운 태스크가 선택되었다면..
 	if (likely(prev != next)) {
+		// context switching 횟수를 나타내는 nr_switches 필드를 증가시킴.
 		rq->nr_switches++;
+		// 새로 선택한 태스크 next를 rq의 current task로 설정함.
 		rq->curr = next;
 		++*switch_count;
 
 		trace_sched_switch(preempt, prev, next);
+		// register set을 스위칭함. 
+		// prev의 register 정보는 prev의 thread_struct의 cpu_context 구조체에 백업
+		// next의 register 정보는 cpu_context 구조체에서 register로 복원함.
+		// stack pointer를 가리키는 sp_el0가 next의 stack을 가리키도록 설정함.
 		rq = context_switch(rq, prev, next); /* unlocks the rq */
+	// prev가 그대로 선택되면...
 	} else {
 		lockdep_unpin_lock(&rq->lock);
 		raw_spin_unlock_irq(&rq->lock);
@@ -3282,6 +3511,7 @@ STACK_FRAME_NON_STANDARD(__schedule); /* switch_to() */
 
 static inline void sched_submit_work(struct task_struct *tsk)
 {
+	// if task state is running or pi blocked, return
 	if (!tsk->state || tsk_is_pi_blocked(tsk))
 		return;
 	/*
@@ -3301,7 +3531,8 @@ asmlinkage __visible void __sched schedule(void)
 		/* 선점 비활성화...*/
 		preempt_disable();
 		__schedule(false);
-		/* 선점 활성화.. */
+		/* 선점 활성화..  preempt_enable()을 안쓰는 이유는
+		preempt_schedule()을 부르지 않게 하기 위해서임..*/
 		sched_preempt_enable_no_resched();
 	} while (need_resched());
 }
@@ -3359,13 +3590,17 @@ static void __sched notrace preempt_schedule_common(void)
  * this is the entry point to schedule() from in-kernel preemption
  * off of preempt_enable. Kernel preemptions off return from interrupt
  * occur there and call schedule directly.
+ in-kernel preemption off에서 schedule()을 부르는 포인트임.
  */
 asmlinkage __visible void __sched notrace preempt_schedule(void)
 {
 	/*
 	 * If there is a non-zero preempt_count or interrupts are disabled,
 	 * we do not want to preempt the current task. Just return..
+	 preempt_count가 0이 아니거나 인터럽트가 비활성화되어있다면
+	 현재 태스크를 선점하길 원하지는 않는것이다.
 	 */
+	// preempt_count -= 1
 	if (likely(!preemptible()))
 		return;
 
@@ -3418,18 +3653,25 @@ EXPORT_SYMBOL_GPL(preempt_schedule_notrace);
  * off of irq context.
  * Note, that this is called and return with irqs disabled. This will
  * protect us against recursive calling from irq.
+ 이 함수는 인터럽트 컨텍스트에서 kernel preemption off에서 schedule()을 부르는 진입점이다
+ 이 함수는 인터럽트가 비활성화 된 상태에서 호출되고 리턴된다.
+
  */
 asmlinkage __visible void __sched preempt_schedule_irq(void)
 {
 	enum ctx_state prev_state;
 
 	/* Catch callers which need to be fixed */
+	// 선점카운트가 0이 아니거나 인터럽트가 꺼져 있다면..
+	// oops
 	BUG_ON(preempt_count() || !irqs_disabled());
 
 	prev_state = exception_enter();
 
 	do {
+		// 선점을 비활성화한다..
 		preempt_disable();
+		// local irq를 활성화한다.
 		local_irq_enable();
 		__schedule(true);
 		local_irq_disable();

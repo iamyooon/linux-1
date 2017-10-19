@@ -326,6 +326,10 @@ static void uao_thread_switch(struct task_struct *next)
 /*
  * Thread switching.
  */
+// register set을 스위칭함. 
+// prev의 register 정보는 prev의 thread_struct의 cpu_context 구조체에 백업
+// next의 register 정보는 cpu_context 구조체에서 register로 복원함.
+// stack pointer를 가리키는 sp_el0가 next의 stack을 가리키도록 설정함.
 struct task_struct *__switch_to(struct task_struct *prev,
 				struct task_struct *next)
 {
@@ -344,6 +348,10 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	dsb(ish);
 
 	/* the actual thread switch */
+	// register set을 스위칭함. 
+	// prev의 register 정보는 prev의 thread_struct의 cpu_context 구조체에 백업
+	// next의 register 정보는 cpu_context 구조체에서 register로 복원함.
+	// stack pointer를 가리키는 sp_el0가 next의 stack을 가리키도록 설정함.
 	last = cpu_switch_to(prev, next);
 
 	return last;

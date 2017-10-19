@@ -805,6 +805,7 @@ void do_exit(long code)
 	validate_creds_for_do_exit(tsk);
 
 	check_stack_usage();
+	// current's preempt_count -=1
 	preempt_disable();
 	if (tsk->nr_dirtied)
 		__this_cpu_add(dirty_throttle_leaks, tsk->nr_dirtied);

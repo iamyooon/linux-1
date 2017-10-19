@@ -241,6 +241,7 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 	if (likely(!(p->flags & PF_KTHREAD))) {
 		*childregs = *current_pt_regs();
+		// child task의 리턴값이 0이 되는 이유..
 		childregs->ARM_r0 = 0;
 		if (stack_start)
 			childregs->ARM_sp = stack_start;

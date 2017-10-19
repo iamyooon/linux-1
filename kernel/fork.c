@@ -887,6 +887,7 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 	uprobe_free_utask(tsk);
 
 	/* Get rid of any cached register state */
+	// nothing to do
 	deactivate_mm(tsk, mm);
 
 	/*

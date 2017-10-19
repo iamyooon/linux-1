@@ -113,6 +113,8 @@ static inline long __trace_sched_switch_state(bool preempt, struct task_struct *
 	/*
 	 * Preemption ignores task state, therefore preempted tasks are always
 	 * RUNNING (we will not have dequeued if state != RUNNING).
+	 커널 선점은 태스크상태를 무시한다,
+	 따라서 선점된 태스크는 늘 RUNNING상태이다.
 	 */
 	return preempt ? TASK_RUNNING | TASK_STATE_MAX : p->state;
 }

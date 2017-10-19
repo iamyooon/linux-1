@@ -245,6 +245,8 @@ extern char ___assert_task_state[1 - 2*!!(
 #define task_is_stopped(task)	((task->state & __TASK_STOPPED) != 0)
 #define task_is_stopped_or_traced(task)	\
 			((task->state & (__TASK_STOPPED | __TASK_TRACED)) != 0)
+// 태스크가 uninterruptible 상태이거나 TASK_NOLOAD 상태가 아니고
+// PF_FROZEN 플래그를 안썼다면 태스크는 cpu에 로드를 주고 있는 상태임.
 #define task_contributes_to_load(task)	\
 				((task->state & TASK_UNINTERRUPTIBLE) != 0 && \
 				 (task->flags & PF_FROZEN) == 0 && \
@@ -811,6 +813,7 @@ struct signal_struct {
 /* If true, all threads except ->group_exit_task have pending SIGKILL */
 static inline int signal_group_exit(const struct signal_struct *sig)
 {
+	// group exit가 진행중이거나 exit를 진행중인 태스크가 그룹에 존재할 경우 
 	return	(sig->flags & SIGNAL_GROUP_EXIT) ||
 		(sig->group_exit_task != NULL);
 }
@@ -2946,6 +2949,7 @@ static inline int signal_pending(struct task_struct *p)
 	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
 }
 
+// SIGKILL is set as pending signal ?
 static inline int __fatal_signal_pending(struct task_struct *p)
 {
 	return unlikely(sigismember(&p->pending.signal, SIGKILL));
@@ -2956,6 +2960,12 @@ static inline int fatal_signal_pending(struct task_struct *p)
 	return signal_pending(p) && __fatal_signal_pending(p);
 }
 
+// return true below case
+//  1.state is INTERRUPTIBLE
+//  2.SIGKILL is set as pending signal.
+// return false below case
+//  1. not interruptible and task_Wakekill
+//  2. there is no pending signal
 static inline int signal_pending_state(long state, struct task_struct *p)
 {
 	if (!(state & (TASK_INTERRUPTIBLE | TASK_WAKEKILL)))
@@ -2963,6 +2973,8 @@ static inline int signal_pending_state(long state, struct task_struct *p)
 	if (!signal_pending(p))
 		return 0;
 
+	// task'state is interruptible or wakekill
+	// task has pending signal
 	return (state & TASK_INTERRUPTIBLE) || __fatal_signal_pending(p);
 }
 

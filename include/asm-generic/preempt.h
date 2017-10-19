@@ -5,6 +5,8 @@
 
 #define PREEMPT_ENABLED	(0)
 
+// current의 선점카운트를 리턴함
+// 이 값이 0이면 선점가능하다는 것임.
 static __always_inline int preempt_count(void)
 {
 	return current_thread_info()->preempt_count;
@@ -71,6 +73,8 @@ static __always_inline bool __preempt_count_dec_and_test(void)
 
 /*
  * Returns true when we need to resched and can (barring IRQ state).
+ check whether TIF_NEED_RESCHED is set in current task and
+ preempt_count == preempt_offset
  */
 static __always_inline bool should_resched(int preempt_offset)
 {

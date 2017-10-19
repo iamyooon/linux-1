@@ -47,6 +47,7 @@ static inline void contextidr_thread_switch(struct task_struct *next)
 /*
  * Set TTBR0 to empty_zero_page. No translations will be possible via TTBR0.
  */
+// TTBR0 레지스터가 zero page를 가리키도록 설정함. 
 static inline void cpu_set_reserved_ttbr0(void)
 {
 	unsigned long ttbr = virt_to_phys(empty_zero_page);
@@ -179,24 +180,35 @@ enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
  * calling the CPU specific function when the mm hasn't
  * actually changed.
  */
+// 1.init_mm인 경우 TTBR0만 zero page를 가리키도록 설정함.
+// 2.next 태스크의 asid를 구해서 active_asids에 설정함.
+// 3.새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
 static inline void
 switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	  struct task_struct *tsk)
 {
 	unsigned int cpu = smp_processor_id();
 
+	// 같은 mm_struct라면 스위칭할게 없음.
+	// 1.같은 태스크??일리는 없지..
+	// 2.같은 어드레스스페이스를 사용하는 쓰레드..
 	if (prev == next)
 		return;
 
 	/*
 	 * init_mm.pgd does not contain any user mappings and it is always
 	 * active for kernel addresses in TTBR1. Just set the reserved TTBR0.
+	 init_mm의 pgd는 유저매핑이 없음. 
+	 pgd는 항상 TTBR1에 커널주소들이 할성화되어 있다.
+	 TTBR0만 zero page를 가리키도록 설정함.
 	 */
 	if (next == &init_mm) {
 		cpu_set_reserved_ttbr0();
 		return;
 	}
 
+	// next 태스크의 asid를 구해서 active_asids에 설정함.
+	// 새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
 	check_and_switch_context(next, cpu);
 }
 

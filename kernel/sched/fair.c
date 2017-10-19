@@ -38,6 +38,7 @@
 /*
  * Targeted preemption latency for CPU-bound tasks:
  * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
+ 목표로 하는 cpu-bound 태스크의 선점지연시간
  *
  * NOTE: this latency value is not the same as the concept of
  * 'timeslice length' - timeslices in CFS are of variable length
@@ -353,17 +354,25 @@ find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 	se_depth = (*se)->depth;
 	pse_depth = (*pse)->depth;
 
+	// pse와 se가 같은 레벨의 se를 가지도록 
+	// se가 더 높은 부모se를 선택하도록 계쏙 시도..
 	while (se_depth > pse_depth) {
 		se_depth--;
 		*se = parent_entity(*se);
 	}
 
+	// pse와 se가 같은 레벨의 se를 가지도록 
+	// pse가 더 높은 부모se를 선택하도록 계쏙 시도..
 	while (pse_depth > se_depth) {
 		pse_depth--;
 		*pse = parent_entity(*pse);
 	}
 
+	// 같은 CFS런큐에 enqueue되어 있지 않다면..
+	// TBD depth가 같은데 enqueue된 CFS런큐가 같지 않은경우는 머지??
 	while (!is_same_group(*se, *pse)) {
+		// 둘다 enqueue된 CFS런큐가 같아질때까지
+		// 부모 se로 이동..
 		*se = parent_entity(*se);
 		*pse = parent_entity(*pse);
 	}
@@ -617,6 +626,7 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 
 /*
  * The idea is to set a period in which each task runs once.
+ 아이디어는 태스크가 한번 실행될 때의 period를 설정하는것.
  *
  * When there are too many tasks (sched_nr_latency) we have to stretch
  * this period because otherwise the slices get too small.
@@ -625,6 +635,7 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
  */
 static u64 __sched_period(unsigned long nr_running)
 {
+	//
 	if (unlikely(nr_running > sched_nr_latency))
 		return nr_running * sysctl_sched_min_granularity;
 	else
@@ -3500,27 +3511,38 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 {
 	/*
 	 * Update run-time statistics of the 'current'.
+	  current 태스크와 current 태스크가 enqueue되어 있는 CFS 런큐의 아래 필드를 갱신한다.
+
+	  current 태스크의 가장 최근에 실행한 정보를 나타내는 exec_start 필드 갱신
+	  current 태스크의 실행한 시간의 합을 나타내는 sum_exec_runtime 필드 갱신
+	  current 태스크의 중요도를 가중치로 고려한 실행시간을 나타내는 runtime 필드 갱신
+	  current 태스크가 enqueue되어 있는 cfs런큐의 최소 vruntime을 나타내는 min_vruntime 필드 갱신
+	  current 태스크의 load average 갱신
+	  current 태스크가 enqueue되는 cfs 런큐의 share, load weight를 갱신
+	  current 태스크가 선점되어야 한다면 리스케쥴링할 수 있도록 플래그 설정
 	 */
 	update_curr(cfs_rq);
 
 	/*
 	 * Ensure that runnable average is periodically updated.
+	 current 태스크와 current 태스크가 enqueue되어 있는 CFS런큐의 runnable average를 갱신한다.
 	 */
 	update_load_avg(curr, 1);
+	// CFS런큐의 share를 재계산해서 CFS런큐의 load wegith를 갱신한다.
 	update_cfs_shares(cfs_rq);
 
 #ifdef CONFIG_SCHED_HRTICK
 	/*
 	 * queued ticks are scheduled to match the slice, so don't bother
 	 * validating it and just reschedule.
+	 함수를 호출할 때 전달한 queued가 참일 경우 CFS런큐가 속한 런큐의 태스크를 리스케쥴링 한다. 
+	 인자 queued는 hrtimer tick에 의해 task_tick_fair()가 호출될 때는 1이 전달되고 
+	 timer interrupt handler에 의해 task_tick_fair()가 호출 될 때는 0이 전달된다.
 	 */
 	if (queued) {
 		resched_curr(rq_of(cfs_rq));
 		return;
 	}
-	/*
-	 * don't let the period tick interfere with the hrtick preemption
-	 */
 	if (!sched_feat(DOUBLE_TICK) &&
 			hrtimer_active(&rq_of(cfs_rq)->hrtick_timer))
 		return;
@@ -5357,13 +5379,21 @@ wakeup_gran(struct sched_entity *curr, struct sched_entity *se)
 static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
 {
+	// 두 엔티티의 vruntime 차이를 구함.
 	s64 gran, vdiff = curr->vruntime - se->vruntime;
 
+	// current태스크가 덜 실행되었다면...
 	if (vdiff <= 0)
 		return -1;
 
 	gran = wakeup_gran(curr, se);
+	// 너무 조금 실행된 current가 newly woken 태스크에게 선점당한다면
+	// over-scheduling이 될 수 있으므로...
+	// 이 경계를 나타내는 sysctl_wakeup_gran...를
+	// 가상시간으로 변해서 비교함..
+	// gran보다 current 태스크가 se 태스크보다 더 실행된 시간이 크다면..
 	if (vdiff > gran)
+		// 이정도 실행했으면 조금 실행된건 아니니다...
 		return 1;
 
 	return 0;
@@ -5396,6 +5426,20 @@ static void set_skip_buddy(struct sched_entity *se)
 /*
  * Preempt the current task with a newly woken task if needed:
  */
+// current 태스크와 newly woken 태스크의 스케쥴링엔티티가 아래를 만족하도록
+// se를 갱신함.
+// 1) 같은 depth를 가지도록 더 높은 depth를 가진 se를 계층구조의 위로 
+// 올라가며 부모se로 갱신함.
+// 2) se가 enqueue된 CFS런큐가 같아질때까지 계층구조 위로 탐색..
+// current 태스크를 선점할 수 있다면..
+
+// 인자로 전달된 rq의 current 태스크를 선점할 수 있는지 체크한다.
+// 아래 조건을 만족할 경우 리스케쥴링을 설정한다.
+// 1) current 태스크가 idle thread && p가 !idle thread
+// 2) current 태스크가 !idle thread && sysctl_sched_wakeup_granularity보다 더 실행됨
+//
+// 리스케쥴링 해야 할 cpu가 this cpu라면 current 태스크에 TIF_NEED_RESCHED플래그를 설정
+// remote cpu라면 IPI_RESCHEDULE 인터럽트를 발생시켜 리스케쥴링을 요청한다.
 static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	struct task_struct *curr = rq->curr;
@@ -5404,6 +5448,8 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	int scale = cfs_rq->nr_running >= sched_nr_latency;
 	int next_buddy_marked = 0;
 
+	// 런큐의 current 태스크와 newly woken태스크가 동일하다면
+	// 선점을 시도할 필요가 없으므로 리턴..
 	if (unlikely(se == pse))
 		return;
 
@@ -5431,10 +5477,13 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * prevents us from potentially nominating it as a false LAST_BUDDY
 	 * below.
 	 */
+	// 이미 TIF_NEED_RESCHED가 설정되어 있으면 더 필요없이 리턴
 	if (test_tsk_need_resched(curr))
 		return;
 
 	/* Idle tasks are by definition preempted by non-idle tasks. */
+	// current 태스크가 idle 스레드이고 newly woken 태스크가 idle이 아니면
+	// goto preempt
 	if (unlikely(curr->policy == SCHED_IDLE) &&
 	    likely(p->policy != SCHED_IDLE))
 		goto preempt;
@@ -5443,12 +5492,23 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Batch and idle tasks do not preempt non-idle tasks (their preemption
 	 * is driven by the tick):
 	 */
+	// SCHED_IDLE 태스크는 이 함수에 못오지 않나??
+	// newly woken 태스크가 normal이 아닌 batch이거나
+	// wakeup시점의 선점을 지원하지 않는다면 리턴..
 	if (unlikely(p->policy != SCHED_NORMAL) || !sched_feat(WAKEUP_PREEMPTION))
 		return;
 
+	//
+	// current 태스크와 newly woken 태스크의 스케쥴링엔티티가 아래를 만족하도록
+	// se를 갱신함.
+	// 1) 같은 depth를 가지도록 더 높은 depth를 가진 se를 계층구조의 위로 
+	// 올라가며 부모se로 갱신함.
+	// 2) se가 enqueue된 CFS런큐가 같아질때까지 계층구조 위로 탐색..
 	find_matching_se(&se, &pse);
+	// current 태스크의 실행시간정보를 갱신함..
 	update_curr(cfs_rq_of(se));
 	BUG_ON(!pse);
+	// current 태스크를 선점할 수 있다면..
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
 		 * Bias pick_next to pick the sched entity that is
@@ -5462,6 +5522,9 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	return;
 
 preempt:
+	// rq_of(rq)의 cpu가 리스케쥴링되게 하기 위해
+	// this cpu라면 current 태스크에 TI_NEED_RESCHED 플래그를 설정
+	// remote cpu라면 IPI_RESCHEDULE 인터럽트를 보내서 리스케쥴링을 요청함.
 	resched_curr(rq);
 	/*
 	 * Only set the backward buddy when the current task is still
@@ -5472,6 +5535,7 @@ preempt:
 	 * Also, during early boot the idle thread is in the fair class,
 	 * for obvious reasons its a bad idea to schedule back to it.
 	 */
+	 // current가 런큐에 없거나 idle thread라면 리턴..
 	if (unlikely(!se->on_rq || curr == rq->idle))
 		return;
 

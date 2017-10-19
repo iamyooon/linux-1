@@ -83,6 +83,7 @@
  * The preempt_count offset after preempt_disable();
  */
 #if defined(CONFIG_PREEMPT_COUNT)
+// PREEMPT_DISABLE_OFFSET = 1
 # define PREEMPT_DISABLE_OFFSET	PREEMPT_OFFSET
 #else
 # define PREEMPT_DISABLE_OFFSET	0
@@ -114,6 +115,10 @@
  * held spinlocks in non-preemptible kernels.  Thus it should not be
  * used in the general case to determine whether sleeping is possible.
  * Do not use in_atomic() in driver code.
+ atomic context에 있는가?
+ 이 매크로는 atomic context를 늘 감지하는 것은 아님
+ 특히, 이 매크로는 non-preemptible 커널에서 spinlock을 잡았는지 알 수 없다.
+ 그리고 이 매크로는 sleeping이 가능한지 체크하는 용도로는 사용할 수 없다.
  */
 #define in_atomic()	(preempt_count() != 0)
 
@@ -121,12 +126,16 @@
  * Check whether we were atomic before we did preempt_disable():
  * (used by the scheduler)
  */
+// PREEMPT_DISABLE_OFFSET != 1
 #define in_atomic_preempt_off() (preempt_count() != PREEMPT_DISABLE_OFFSET)
 
 #if defined(CONFIG_DEBUG_PREEMPT) || defined(CONFIG_PREEMPT_TRACER)
 extern void preempt_count_add(int val);
 extern void preempt_count_sub(int val);
-/* 선점카운트를 1감소시켰을때 선점이 가능하고 필요하다면 true리턴..*/
+// 선점이 가능하고 필요하다면 
+// preempt_count를 1 감소했을때 아래와 같다면 참을 리턴
+// 1. preemp_count가 0
+// 2. TIF_NEED_RESCHED가 설정
 #define preempt_count_dec_and_test() \
 	({ preempt_count_sub(1); should_resched(0); })
 #else
@@ -135,7 +144,9 @@ extern void preempt_count_sub(int val);
 #define preempt_count_dec_and_test() __preempt_count_dec_and_test()
 #endif
 
+// preempt_count += 1
 #define __preempt_count_inc() __preempt_count_add(1)
+// preempt_count -= 1
 #define __preempt_count_dec() __preempt_count_sub(1)
 
 #define preempt_count_inc() preempt_count_add(1)
@@ -143,12 +154,14 @@ extern void preempt_count_sub(int val);
 
 #ifdef CONFIG_PREEMPT_COUNT
 
+// current's preempt_count -=1
 #define preempt_disable() \
 do { \
 	preempt_count_inc(); \
 	barrier(); \
 } while (0)
 
+// preempt_count -= 1
 #define sched_preempt_enable_no_resched() \
 do { \
 	barrier(); \
@@ -161,8 +174,10 @@ do { \
 #define preemptible()	(preempt_count() == 0 && !irqs_disabled())
 
 #ifdef CONFIG_PREEMPT
-/* 선점카운트를 1감소시켰을때 선점이 가능하고
-또 필요하다면 __preempt_schedule()을 호출함..*/
+// 선점이 가능하고 필요하다면(preempt_count를 1 감소했을때 아래와 같다면)
+// 1. preemp_count가 0
+// 2. TIF_NEED_RESCHED가 설정
+// __preempt_schedule()을 불러서 스케쥴링 시도
 #define preempt_enable() \
 do { \
 	barrier(); \
@@ -206,6 +221,7 @@ do { \
 	barrier(); \
 } while (0)
 
+// preempt_count -= 1
 #define preempt_enable_no_resched_notrace() \
 do { \
 	barrier(); \

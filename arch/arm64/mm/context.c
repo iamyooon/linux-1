@@ -189,11 +189,14 @@ set_asid:
 	return asid | generation;
 }
 
+// next 태스크의 asid를 구해서 active_asids에 설정함.
+// 새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
 void check_and_switch_context(struct mm_struct *mm, unsigned int cpu)
 {
 	unsigned long flags;
 	u64 asid;
 
+	// get asid
 	asid = atomic64_read(&mm->context.id);
 
 	/*
@@ -222,6 +225,7 @@ void check_and_switch_context(struct mm_struct *mm, unsigned int cpu)
 	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
 
 switch_mm_fastpath:
+// 새롭게 실행될 태스크의 pgd의 주소를 ttbr0에 설정함.
 	cpu_switch_mm(mm->pgd, mm);
 }
 

@@ -1526,6 +1526,7 @@ static inline struct rq *task_rq_lock(struct task_struct *p, unsigned long *flag
 		 */
 		if (likely(rq == task_rq(p) && !task_on_rq_migrating(p))) {
 			lockdep_pin_lock(&rq->lock);
+			// rq->lock, p->pi_lock을 unlock안함?
 			return rq;
 		}
 		raw_spin_unlock(&rq->lock);

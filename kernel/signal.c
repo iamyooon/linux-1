@@ -638,6 +638,7 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
  */
 void signal_wake_up_state(struct task_struct *t, unsigned int state)
 {
+	// 태스크가 처리할 지연된 시그널이 있다고 설정함.
 	set_tsk_thread_flag(t, TIF_SIGPENDING);
 	/*
 	 * TASK_WAKEKILL also means wake it up in the stopped/traced/killable
@@ -2366,23 +2367,34 @@ static void retarget_shared_pending(struct task_struct *tsk, sigset_t *which)
 	sigset_t retarget;
 	struct task_struct *t;
 
+	// 전달된 unblocked signalset과 태스크그룹에 shared pending signal의 
+	// 교집합을 구함.
 	sigandsets(&retarget, &tsk->signal->shared_pending.signal, which);
+	// 해당 교집합이 비어있다면 retarget할게 없음. 리턴..
 	if (sigisemptyset(&retarget))
 		return;
 
 	t = tsk;
+	// 태스크그룹내의 모든 쓰레드를 하나씩 선택..
 	while_each_thread(tsk, t) {
+		// 종료중인 쓰레드는 패스..
 		if (t->flags & PF_EXITING)
 			continue;
 
+		// 선택된 태스크가 처리가능한 unblocking pending signal이
+		// 없다면 패스..
 		if (!has_pending_signals(&retarget, &t->blocked))
 			continue;
 		/* Remove the signals this thread can handle. */
+		// 선택된 쓰레드가 처리할 수 있는 시그널만 남겨두도록 설정..
 		sigandsets(&retarget, &retarget, &t->blocked);
 
+		// 선택된 쓰레드에 지연된 시그널이 없다면..
+		// 쓰레드를 깨워서 시그널을 처리하게 한다.
 		if (!signal_pending(t))
 			signal_wake_up(t, 0);
 
+		// pending signal을 모두 retarget했다면 종료..
 		if (sigisemptyset(&retarget))
 			break;
 	}
@@ -2397,9 +2409,14 @@ void exit_signals(struct task_struct *tsk)
 	 * @tsk is about to have PF_EXITING set - lock out users which
 	 * expect stable threadgroup.
 	 */
+	// 쓰레드그룹에 변경이 발생하는 작업수행전에 락을 검.
 	threadgroup_change_begin(tsk);
 
+	// 태스크가 쓰레드그룹이 아니거나..
+	// group exit가 진행중이거나
+	// exit를 진행중인 태스크가 그룹에 존재할 경우 
 	if (thread_group_empty(tsk) || signal_group_exit(tsk->signal)) {
+		// PF_EXITING만 설정하고 나옴..
 		tsk->flags |= PF_EXITING;
 		threadgroup_change_end(tsk);
 		return;
@@ -2410,15 +2427,21 @@ void exit_signals(struct task_struct *tsk)
 	 * From now this task is not visible for group-wide signals,
 	 * see wants_signal(), do_signal_stop().
 	 */
+	// PF_EXITING 플래그를 설정해서 태스크가 종료중임을 나타냄.
 	tsk->flags |= PF_EXITING;
 
 	threadgroup_change_end(tsk);
 
+	// 처리못한 펜딩시그널이 없다면
 	if (!signal_pending(tsk))
 		goto out;
 
+	// 처리못한 펜딩시그널이 있다면..
+	// blocking되지 않은 시그널
 	unblocked = tsk->blocked;
 	signotset(&unblocked);
+	// 태스크의 pending signal을 처리할 쓰레드를 지정해서
+	// pending signal을 처리한다.
 	retarget_shared_pending(tsk, &unblocked);
 
 	if (unlikely(tsk->jobctl & JOBCTL_STOP_PENDING) &&
