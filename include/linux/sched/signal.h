@@ -347,6 +347,10 @@ extern void recalc_sigpending(void);
 
 extern void signal_wake_up_state(struct task_struct *t, unsigned int state);
 
+// 태스크가 시그널을 처리하도록 해야 한다.
+// 먼저 TIF_SIGPENDING을 설정한 후에 태스크가 잠들었거나 resume이 1이라면
+// TASK_WAKEKILL 상태라면 깨우고, 동작중이라면 커널모드로 진입시켜서 
+// 시그널이 존재하는걸 알아차리게 한다.
 static inline void signal_wake_up(struct task_struct *t, bool resume)
 {
 	signal_wake_up_state(t, resume ? TASK_WAKEKILL : 0);

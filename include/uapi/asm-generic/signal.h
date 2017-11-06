@@ -4,9 +4,10 @@
 
 #include <linux/types.h>
 
-#define _NSIG		64
-#define _NSIG_BPW	__BITS_PER_LONG
-#define _NSIG_WORDS	(_NSIG / _NSIG_BPW)
+#define _NSIG		64			// number of all signal
+#define _NSIG_BPW	__BITS_PER_LONG		// long 변수로 표현가능한 비트수, arm64=64
+#define _NSIG_WORDS	(_NSIG / _NSIG_BPW)	// all signal을 표현하는데 필요한 워드개수
+						// arm64=1, arm=2
 
 #define SIGHUP		 1
 #define SIGINT		 2
@@ -88,7 +89,8 @@
 
 #ifndef __ASSEMBLY__
 typedef struct {
-	unsigned long sig[_NSIG_WORDS];
+	unsigned long sig[_NSIG_WORDS];	// 모든 시그널을 비트맵으로 표현하는데 필요한 개수를
+					// 요소로 갖음. arm64 = 1
 } sigset_t;
 
 /* not actually used, but required for linux/syscalls.h */
