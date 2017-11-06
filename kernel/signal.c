@@ -2174,22 +2174,33 @@ int get_signal(struct ksignal *ksig)
 	try_to_freeze();
 
 relock:
+	// irq off && acquire spinlock
 	spin_lock_irq(&sighand->siglock);
 	/*
 	 * Every stopped thread goes here after wakeup. Check to see if
 	 * we should notify the parent, prepare_signal(SIGCONT) encodes
 	 * the CLD_ si_code into SIGNAL_CLD_MASK bits.
 	 */
+	// 그럴리 없지만..
+	// SIGNAL_CLD_CONTINUED, SIGNAL_CLD_STOPPED 시그널중 하나라도 설정되었다면
 	if (unlikely(signal->flags & SIGNAL_CLD_MASK)) {
 		int why;
 
+		// 설정된 시그널을 why에 저장함.
 		if (signal->flags & SIGNAL_CLD_CONTINUED)
 			why = CLD_CONTINUED;
 		else
 			why = CLD_STOPPED;
 
+		// current 태스크의 signal_struct 구조체의 flags에서 SIGNAL_CLD_MASK
+		// 를 제거한다. SIGNAL_CLD_{CONTINUED,STOPPED} 플래그가 설정되어 있다면
+		// 제거하고 원래부터 설정되어 있지 않다면 바뀌는것은 없다.
 		signal->flags &= ~SIGNAL_CLD_MASK;
 
+		// current 태스크의 signal_struct 구조체의 flags를 변경하는데
+		// 이유는 모르겠지만 sighand_struct 구조체의 siglock을 쓰네...
+		// lock이 sighand_struct 구조체에만 있나본...
+		// 여튼 irq on && release spinlock
 		spin_unlock_irq(&sighand->siglock);
 
 		/*
