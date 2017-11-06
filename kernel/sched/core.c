@@ -843,6 +843,7 @@ static int effective_prio(struct task_struct *p)
  *
  * Return: 1 if the task is currently executing. 0 otherwise.
  */
+// 태스크(@p)가 현재 실행중인 태스크라면..(current task)
 inline int task_curr(const struct task_struct *p)
 {
 	return cpu_curr(task_cpu(p)) == p;
@@ -1417,25 +1418,53 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 
 /***
  * kick_process - kick a running thread to enter/exit the kernel
+ * kick_process - 실행중인 태스크를 커널에 진입시키거나 종료시킨다.
  * @p: the to-be-kicked thread
+ * @p: kick할 태스크
  *
  * Cause a process which is running on another CPU to enter
  * kernel-mode, without any delay. (to get signals handled.)
+ * 다른 CPU에서 실행중인 태스크를 delay없이(시그널을 처리하기 위해?)
+ * 커널모드로 진입시킨다.
  *
  * NOTE: this function doesn't have to take the runqueue lock,
  * because all it wants to ensure is that the remote task enters
  * the kernel. If the IPI races and the task has been migrated
  * to another CPU then no harm is done and the purpose has been
  * achieved as well.
+ * 이 함수는 runqueue lock을 잡지 않는다, 
+ * 왜냐하면 이 함수가 원하는 것은 remote task가 단지 커널모드에
+ * 진입하는 것뿐이기 때문이다.
+ * 만약 IPI가 경쟁상태에 빠지고 태스크가 다른 CPU로 이주하더라도
+ * 피해는 없고 목적은 달성하게 된다. 
  */
+// TBD 이 함수의 의미를 정확히 모르겠음.
+// 태스크가 동작중인 다른 CPU에 irq를 발생시켜서 kernel mode로 진입시키면
+// 머가 달라지지? 위에서 얘기한대로 signal 처리를 빨리 시키기 위해서인거 같은데
+// el1_irq에서 signal 처리로 빠지는 루틴이 있던가???
+// 예를 들어 signal_wake_up_state()에서 이 함수가 불리는 조건이 wakeup 못시켰을때인데..
+// NEED_RESCHED가 설정안되어 있을꺼잖아?
+// 선점도 비활성화시켰을테니 el1_irq에서 할수 있는게 없지 않나?
+// 이런 상상을 해보자... 해당 태스크는 그냥 유저모드에서 열심히 동작중인거야..
+// 이상황에서 IPI르 보내서 el0_irq에 진입하게 하고..need resched는 모르겠고...
+// IPI irq처리를 마치면 work_pending에 들어가겠지..여기서 TIF_WORK_MASK를 체크할테니..
+// 여기서 SIGPENDING플래그를 체크하겠네.... 그럼 해당 태스크를 바로 시그널을 처리할 수 있겠지..
+// TBD. 커널모드인 상황에서 시그널을 받으면 어찌될까? 
+// NTDP 커널모드, 유저모드에서 kick되면 혹은 시그널을 받을경우의 flow
 void kick_process(struct task_struct *p)
 {
 	int cpu;
 
+	// 선점 비활성화...
 	preempt_disable();
+	// 태스크가 실행중인 cpu정보..
 	cpu = task_cpu(p);
+	// 태스크가 current cpu가 아닌 다른 곳에서 실행중이고
+	// 태스크가 current 태스크라면..
 	if ((cpu != smp_processor_id()) && task_curr(p))
+		// 해당 태스크가 실행중인 cpu에 reschule IPI를 보낸다.
 		smp_send_reschedule(cpu);
+	// 다시 선점을 활성화함.
 	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(kick_process);

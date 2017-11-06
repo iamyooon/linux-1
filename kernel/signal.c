@@ -59,11 +59,15 @@ static struct kmem_cache *sigqueue_cachep;
 
 int print_fatal_signals __read_mostly;
 
+// 태스크 @t의 signal @sig에 설정된 핸들러 함수의 주소를 리턴함
 static void __user *sig_handler(struct task_struct *t, int sig)
 {
 	return t->sighand->action[sig - 1].sa.sa_handler;
 }
 
+// 아래 중 하나라도 만족할 경우 해당 signal은 처리하지 않고 무시한다.
+// 1. handler가 SIG_IGN으로 설정되어 있는 경우
+// 2. handler가 SIG_DFL로 설정되어 있고 SIGCONT,SIGCHLD,SIGWINCH,SIGURG 시그널인 경우
 static int sig_handler_ignored(void __user *handler, int sig)
 {
 	/* Is it explicitly or implicitly ignored? */
@@ -75,15 +79,32 @@ static int sig_task_ignored(struct task_struct *t, int sig, bool force)
 {
 	void __user *handler;
 
+	// 태스크(@t)의 signal(@sig)에 설정된 핸들러 함수의 주소를 리턴함
 	handler = sig_handler(t, sig);
 
+	// 그럴리 없지만, fatal signal을 무시하도록 하는 플래그가
+	// 설정되어 있고(init이고, handler가 별도로 설정되어 있지 않고
+	// SIG_DFL이고 함수를 호출할 때 force가 false로 전달되어 있다면 
+	// 시그널(@sig)는 무시해도 된다.
+	// 정리하면, 이 함수의 대상이 init 태스크이고 인자 force로 false가
+	// 전달되었다면 시그널 @sig는 무시해도 된다.
 	if (unlikely(t->signal->flags & SIGNAL_UNKILLABLE) &&
 			handler == SIG_DFL && !force)
 		return 1;
 
+	// 아래 중 하나라도 만족할 경우 해당 signal은 처리하지 않고 무시한다.
+	// 1. handler가 SIG_IGN으로 설정되어 있는 경우
+	// 2. handler가 SIG_DFL로 설정되어 있고 SIGCONT,SIGCHLD,SIGWINCH,SIGURG 시그널인 경우
 	return sig_handler_ignored(handler, sig);
 }
 
+// 아래 조건을 모두 만족하는 경우 태스크(@t)의  해당 시그널(@sig)는 무시되므로 return 1
+// 1) !blocked signal
+// 2) !real_blocked signal
+// 3) 시그널(@sig)의 handler가 SIG_IGN이 아닌 경우
+// 4) 시그널(@sig)의 handler가 SIG_DFL이 아닌 경우
+// 5) 시그널이 SIGCONT,SIGCHLD,SIGWINCH,SIGURG가 아닌 경우
+// ^) 태스크(@t)의 ptrace 멤버변수가 0으로 설정되어 있는 경우
 static int sig_ignored(struct task_struct *t, int sig, bool force)
 {
 	/*
@@ -91,15 +112,23 @@ static int sig_ignored(struct task_struct *t, int sig, bool force)
 	 * signal handler may change by the time it is
 	 * unblocked.
 	 */
+	// 아래 경우중 하나라도 만족하는 경우 무시되지 않는 시그널이므로 return 0
+	// 1) 시그널(@sig)이 blocked signal인 경우
+	// 2) 시그널(@sig)이 real blocked signal인 경우
 	if (sigismember(&t->blocked, sig) || sigismember(&t->real_blocked, sig))
 		return 0;
 
+	// 아래 경우 모두 만족하지 않으면 해당 signal은 무시되지 않으므로 return 0
+	// 1. handler가 SIG_IGN으로 설정되어 있는 경우
+	// 2. handler가 SIG_DFL로 설정되어 있고 SIGCONT,SIGCHLD,SIGWINCH,SIGURG 시그널인 경우
 	if (!sig_task_ignored(t, sig, force))
 		return 0;
 
 	/*
 	 * Tracers may want to know about even ignored signals.
 	 */
+	// 태스크(@t)의 ptrace 멤버변수가 설정되어 있다면 return 0
+	// 아니라면 해당 시그널을 무시된다.
 	return !t->ptrace;
 }
 
@@ -107,14 +136,25 @@ static int sig_ignored(struct task_struct *t, int sig, bool force)
  * Re-calculate pending state from the set of locally pending
  * signals, globally pending signals, and blocked signals.
  */
+// 어떤 sigset도 모두 인자로 올 수 있기는 하지만..
+// pending sigset이 왔다는 가정하에 말하자면...
+// blocked signal을 제외하고 pending 상태의 시그널이 존재한다면 return 1,
+// otherwirse return 0
 static inline int has_pending_signals(sigset_t *signal, sigset_t *blocked)
 {
 	unsigned long ready;
 	long i;
 
+	// 시스템의 모든시그널을 표현하기 위해 필요한 워드수
 	switch (_NSIG_WORDS) {
+	// 필요한 워드수가 4,2,1이 아니라면...
+	// 아마 4,2,1의 경우는 성능향상을 위해 다 풀어서 저렇게 구하고..
+	// 그외의 경우는 모든 케이스를 커버하기 위해 아래와 같이 하나보다...
 	default:
+		// 필요한 워드수 만큼 아래를 반복함..
 		for (i = _NSIG_WORDS, ready = 0; --i >= 0 ;)
+			// sig[i]에서 blocked signal에 설정된 시그널을 제외해서
+			// ready에 or함..
 			ready |= signal->sig[i] &~ blocked->sig[i];
 		break;
 
@@ -130,11 +170,24 @@ static inline int has_pending_signals(sigset_t *signal, sigset_t *blocked)
 
 	case 1: ready  = signal->sig[0] &~ blocked->sig[0];
 	}
+
+	// non-blocked signal중에 pending signal이 존재한다면 참을 리턴
+	// 없다면 0을 리턴..
 	return ready !=	0;
 }
 
+// helper macro
+// return 1 if there are one more pending signal
+// return 0 if there is no pending signal
 #define PENDING(p,b) has_pending_signals(&(p)->signal, (b))
 
+// 아래 조건중 하나라도 만족할 경우에는 pending signal 처리를 위해
+// 태스크(@t)에 TIF_SIGPENDING을 설정하고 return 1
+// 만족하는 조건이 없다면 pending signal이 없는것이므로 return 0
+//
+// 1) STOP, TRAP_STOP, TRAP_NOTIFY jobctl 비트가 설정된 경우 TBD) jobctl??
+// 2) 태스크(@t)에 non-blocked && pending 상태의 signal이 존재하는 경우
+// 3) 태스크(@t)에 non-blocked && shared_pending 상태의 signal이 존재하는 경우
 static int recalc_sigpending_tsk(struct task_struct *t)
 {
 	if ((t->jobctl & JOBCTL_PENDING_MASK) ||
@@ -155,56 +208,90 @@ static int recalc_sigpending_tsk(struct task_struct *t)
  * After recalculating TIF_SIGPENDING, we need to make sure the task wakes up.
  * This is superfluous when called on current, the wakeup is a harmless no-op.
  */
+// 태스크(@t)에 pending signal이 있다면TIF_SIGPENDING을 설정하고
+// 태스크가 시그널을 처리하도록 깨우거나
+// 이미 깨어나 동작중이라면 커널모드로 진입시킨다. 
 void recalc_sigpending_and_wake(struct task_struct *t)
 {
 	if (recalc_sigpending_tsk(t))
 		signal_wake_up(t, 0);
 }
 
+// pending signal이 없다면 current 태스크의 SIGPENDING 플래그를 제거한다.
+// 단 current 태스크가 freezing 상태이거나 freeze가 필요하다면 제거하지 않는다.
 void recalc_sigpending(void)
 {
+	// pending signal이 없고 current 태스크가 freeze 상태가 아니거나
+	// freezing이 필요하지 않다면
+	// TBD. !freezing 조건은 왜붙었을까..
 	if (!recalc_sigpending_tsk(current) && !freezing(current))
+		// TIF_SIGPENDING 플래그를 제거한다.
 		clear_thread_flag(TIF_SIGPENDING);
 
 }
 
 /* Given the mask, find the first available signal that should be serviced. */
-
+// 아마 먼저 처리되어야 할 시그널리스트인것 같음..
 #define SYNCHRONOUS_MASK \
 	(sigmask(SIGSEGV) | sigmask(SIGBUS) | sigmask(SIGILL) | \
 	 sigmask(SIGTRAP) | sigmask(SIGFPE) | sigmask(SIGSYS))
 
+// @pending	- pending signal structure 
+// @mask	- mask sigset
+// mask되지 않은 처리할 pending signal을 낮은 번호순으로 구함.
+// 이때 먼저 처리되어야 할 sigsegv, sigbus, sigill, sigtrap, sigfpe, sigsys
+// 가 pending되어있다면 이 시그널을 낮은 순서대로 먼저 리턴함.
 int next_signal(struct sigpending *pending, sigset_t *mask)
 {
 	unsigned long i, *s, *m, x;
 	int sig = 0;
 
+	// get pending signal bitmap and mask bitmap
 	s = pending->signal.sig;
 	m = mask->sig;
 
 	/*
 	 * Handle the first word specially: it contains the
 	 * synchronous signals that need to be dequeued first.
+	 * TBD. SIGSYS는 30번을 넘고..  NSIG_WORDS가 16이라면 
+	 * sigsys는 first word에 오지 않는데?????????
 	 */
+	// mask bitmap에 없는 signal만 pending signal에서 고름
 	x = *s &~ *m;
+	// valid pending signal이 존재한다면..
 	if (x) {
+		// 먼저 처리 되어야 할 시그널이 존재한다면
 		if (x & SYNCHRONOUS_MASK)
+			// 그 시그널만 남기고 clear
 			x &= SYNCHRONOUS_MASK;
+		// 먼저 처리되어야 할 시그널외의 모든 시그널중에서
+		// first zero bit를 찾음. TBD. 이게 무슨의미지??
+		// zero bit가 연속되어 있으면 +1해봤자 먼저 처리되어야 할
+		// 시그널이 선택되지는 않자나?
 		sig = ffz(~x) + 1;
 		return sig;
 	}
 
+	// 시스템의 모든 시그널을 표현하는데 필요한 워드수에 따라 분기..
+	// arm64=1, arm32=2
 	switch (_NSIG_WORDS) {
+	// 2,1을 제외한 모든 경우..
 	default:
+		// 모든 sigset bitmap을 순회하면서 아래를 반복..
 		for (i = 1; i < _NSIG_WORDS; ++i) {
+			// mask되지 않는 pending signal을 구함.
 			x = *++s &~ *++m;
+			// mask되지 않는 pending signal이 없다면 다음 인덱스로 이동
 			if (!x)
 				continue;
+			// signal 번호가 작은 순서대로 먼저 signal nr을 구함.
 			sig = ffz(~x) + i*_NSIG_BPW + 1;
 			break;
 		}
 		break;
 
+	// 2의 경우에는 두번째 비트맵을 체크한다.
+	// 첫번째비트맵은 위에서 이미 처리함.
 	case 2:
 		x = s[1] &~ m[1];
 		if (!x)
@@ -212,6 +299,7 @@ int next_signal(struct sigpending *pending, sigset_t *mask)
 		sig = ffz(~x) + _NSIG_BPW + 1;
 		break;
 
+	// 첫번째비트맵은 위에서 이미 처리함.
 	case 1:
 		/* Nothing to do */
 		break;
@@ -220,6 +308,8 @@ int next_signal(struct sigpending *pending, sigset_t *mask)
 	return sig;
 }
 
+// 아마 한도이상으로 시그널이 많이 왔거나, 너무 짧은시간안에 한번 더 
+// 전달되었다면 drop되었다는 정보를 출력해주는것으로 보임..
 static inline void print_dropped_signal(int sig)
 {
 	static DEFINE_RATELIMIT_STATE(ratelimit_state, 5 * HZ, 10);
@@ -656,8 +746,12 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
  * No need to set need_resched since signal event passing
  * goes through ->blocked
  */
+// 태스크가 시그널을 처리하도록 해야 한다.
+// 먼저 TIF_SIGPENDING을 설정한 후에 태스크가 잠들었다면 깨우고
+// 동작중이라면 커널모드로 진입시켜서 시그널이 존재하는걸 알아차리게 한다.
 void signal_wake_up_state(struct task_struct *t, unsigned int state)
 {
+	// t->stack->flags |= TIF_SIGPENDING
 	set_tsk_thread_flag(t, TIF_SIGPENDING);
 	/*
 	 * TASK_WAKEKILL also means wake it up in the stopped/traced/killable
@@ -665,8 +759,16 @@ void signal_wake_up_state(struct task_struct *t, unsigned int state)
 	 * executing another processor and just now entering stopped state.
 	 * By using wake_up_state, we ensure the process will wake up and
 	 * handle its death signal.
+	 TASK_WAKEKILL은 stopped/traced/killable 상태의 태스크도 깨운다.
+	 우리는 여기서 t->State를 체크하지 않는다. 왜냐하면 여기서 그걸 체크하면
+	 실행중인 다른 프로세서와 경쟁상태가 되어 stopped state가 되기  때문이다. 
+	 wake_up_state()를 사용하면 프로세스가 깨어나서 자신의 death signal을 처리하는것
+	 을 보장할 수 있다.
 	 */
+	// 태스크의 상태가 TASK_INTERRUPTIBLE or 함수 호출시 지정한 state라면 wake-up시킨다.
+	// 태스크의 상태가 TASK_INTERRUPTIBLE이 아니라면 
 	if (!wake_up_state(t, state | TASK_INTERRUPTIBLE))
+		// wake-up하지 못했다면 발로차서라도 시그널 처리하도록??
 		kick_process(t);
 }
 
@@ -1711,17 +1813,23 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 
 	if (for_ptracer) {
 		parent = tsk->parent;
+	// get_signal()에서 호출할때는 false
 	} else {
+		// 스레드리더태스크..
 		tsk = tsk->group_leader;
+		// 스레드그룹의 부모태스크..
 		parent = tsk->real_parent;
 	}
 
+	// siginfo 구조체를 초기화한다.
+	// signal nr은 SIGCHLD, errno는 0
 	info.si_signo = SIGCHLD;
 	info.si_errno = 0;
 	/*
 	 * see comment in do_notify_parent() about the following 4 lines
 	 */
 	rcu_read_lock();
+	// 부모가 속한 pid ns 레벨에서의 task의 pid를 설정함.
 	info.si_pid = task_pid_nr_ns(tsk, task_active_pid_ns(parent));
 	info.si_uid = from_kuid_munged(task_cred_xxx(parent, user_ns), task_uid(tsk));
 	rcu_read_unlock();
@@ -1730,6 +1838,7 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 	info.si_utime = nsec_to_clock_t(utime);
 	info.si_stime = nsec_to_clock_t(stime);
 
+	// 부모에게 보낼 시그널정보?를 설정하고 si_statue도 그에 맞게 설정함.
  	info.si_code = why;
  	switch (why) {
  	case CLD_CONTINUED:
@@ -1745,7 +1854,10 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
  		BUG();
  	}
 
+	// 부모의 시그널핸들러 정보를 담고 있는 sighand_struct 구조체를 가져옴.
 	sighand = parent->sighand;
+	// 부모의 시그널 핸들러 정보를 수정하려고 하는건가?
+	// spinlock을 잡고 irq를 off함. 뒤에 save가 붙으니까 먼가를 save하나?
 	spin_lock_irqsave(&sighand->siglock, flags);
 	if (sighand->action[SIGCHLD-1].sa.sa_handler != SIG_IGN &&
 	    !(sighand->action[SIGCHLD-1].sa.sa_flags & SA_NOCLDSTOP))
@@ -2160,6 +2272,8 @@ int get_signal(struct ksignal *ksig)
 	struct signal_struct *signal = current->signal;
 	int signr;
 
+	// 태스크가 커널모드에서 빠져나가거나 exit, stop하는 경우에
+	// 호출될 work이 있을리 없지만 있다면 실행시킨다.
 	if (unlikely(current->task_works))
 		task_work_run();
 
@@ -2210,6 +2324,7 @@ relock:
 		 * wait(2) either, but, for backward compatibility, notify
 		 * the ptracer of the group leader too unless it's gonna be
 		 * a duplicate.
+		 부모 태스크에게 태스크가 계속 진행된다고 알린다.
 		 */
 		read_lock(&tasklist_lock);
 		do_notify_parent_cldstop(current, false, why);
