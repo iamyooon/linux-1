@@ -811,7 +811,7 @@ ret_fast_syscall_trace:
  */
 work_pending:
 	mov	x0, sp				// 'regs'
-	bl	do_notify_resume
+	bl	do_notify_resume		// with pt_regs, thread_flags
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_on		// enabled while in userspace
 #endif
