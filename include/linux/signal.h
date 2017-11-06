@@ -63,12 +63,24 @@ static inline void sigdelset(sigset_t *set, int _sig)
 		set->sig[sig / _NSIG_BPW] &= ~(1UL << (sig % _NSIG_BPW));
 }
 
+// @set - signal bitmap
+// @_sig - signal nr
+// signal(_sig)가 sigset(@set)의 멤버라면 1을 리턴함.
+// 특정 시그널이 block sigset, pending sigset등에 설정되어 있는지를 체크할 때 사용함.
 static inline int sigismember(sigset_t *set, int _sig)
 {
+	// signal(@_sig)을 가리키는 비트맵의 인덱스를 구함
 	unsigned long sig = _sig - 1;
+	// 시스템의 모든 시그널을 표현하는데 필요한 word개수가 1개라면,i.e) arm64=1
 	if (_NSIG_WORDS == 1)
+		// 비트맵의 sig번째 비트가 설정되어 있다면 1을 리턴, otherwise return 0
 		return 1 & (set->sig[0] >> sig);
+	// 필요한 word개수가 2개 이상이라면.. i.e) arm=2
 	else
+		// 시그널 번호를 시그널 비트맵을 표현할때 사용한 long 변수로 표현가능한 비트수로
+		// 나눈다. 예를 들어 arm32의 경우 _NSIG_BPW가 32이므로 sig가 60일 경우
+		// 60/32 -> 1이 되고 sig[1]의 (60%32 -> )28번째 비트를 보면 된다.
+		// NTDP arm,arm64에 따라 달라지는 sigset의 구성. 1개 2개
 		return 1 & (set->sig[sig / _NSIG_BPW] >> (sig % _NSIG_BPW));
 }
 

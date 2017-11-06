@@ -76,7 +76,7 @@ void arch_setup_new_exec(void);
  *  TIF_NOTIFY_RESUME	- callback before returning to user
  *  TIF_USEDFPU		- FPU was used by this task this quantum (SMP)
  */
-#define TIF_SIGPENDING		0
+#define TIF_SIGPENDING		0	// 처리할 시그널이 있는 상태임을 알리는 플래그
 #define TIF_NEED_RESCHED	1
 #define TIF_NOTIFY_RESUME	2	/* callback before returning to user */
 #define TIF_FOREIGN_FPSTATE	3	/* CPU's FP state is not current's */
