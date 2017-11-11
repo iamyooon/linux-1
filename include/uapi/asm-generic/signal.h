@@ -59,6 +59,7 @@
  * SA_ONSTACK indicates that a registered stack_t will be used.
  * SA_RESTART flag to get restarting signals (which were the default long ago)
  * SA_NOCLDSTOP flag to turn off SIGCHLD when children stop.
+ * -> SA_NOCLDSTOP 플래그는 자식태스크의 stop에 대한 SIGCHLD 시그널을 받지 않고 싶을때 사용됨.
  * SA_RESETHAND clears the handler when the signal is delivered.
  * SA_NOCLDWAIT flag on SIGCHLD to inhibit zombies.
  * SA_NODEFER prevents the current signal from being masked in the handler.

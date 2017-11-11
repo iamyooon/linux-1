@@ -1487,8 +1487,10 @@ static int child_wait_callback(wait_queue_entry_t *wait, unsigned mode,
 	return default_wake_function(wait, mode, sync, key);
 }
 
+// wait()중인 태스크를 깨움.
 void __wake_up_parent(struct task_struct *p, struct task_struct *parent)
 {
+	//
 	__wake_up_sync_key(&parent->signal->wait_chldexit,
 				TASK_INTERRUPTIBLE, 1, p);
 }
@@ -1502,6 +1504,8 @@ static long do_wait(struct wait_opts *wo)
 
 	init_waitqueue_func_entry(&wo->child_wait, child_wait_callback);
 	wo->child_wait.private = current;
+	// 태스크를 waitqueue에 enqueue한다.
+	// 추후에 자식 태스크에 의해서 깨어난다.
 	add_wait_queue(&current->signal->wait_chldexit, &wo->child_wait);
 repeat:
 	/*

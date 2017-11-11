@@ -1176,6 +1176,8 @@ static inline pid_t task_tgid_nr(struct task_struct *tsk)
 
 /**
  * pid_alive - check that a task structure is not stale
+ * pid_alive - 태스크의 task_struct 구조체가 stale(상한?) 상태인지 체크한다
+ *
  * @p: Task structure to be checked.
  *
  * Test if a process is not yet dead (at most zombie state)
