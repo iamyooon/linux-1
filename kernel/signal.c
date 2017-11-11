@@ -797,11 +797,18 @@ static int flush_sigqueue_mask(sigset_t *mask, struct sigpending *s)
 	return 1;
 }
 
+// siginfo 구조체 대신 SEND_SIG_{PRIV,FORCED}를 나타낸다면 
+// special siginfo라고 할 수 있다.
 static inline int is_si_special(const struct siginfo *info)
 {
 	return info <= SEND_SIG_FORCED;
 }
 
+// 아래 조건 1,2중 하나라도 만족하는 경우 유저영역에서 온 siginfo 구조체
+// 이므로 참을 리턴한다.
+// 1)   siginfo 구조체 대신 SEND_SIG_NO_INFO를 나타내는 경우
+// 2-1) siginfo 구조체가 SEND_SIG_{PRIV,FORCED}를 나타내지 않는 경우
+// 2-2) siginfo 구조체가 유저영역에서 온 경우
 static inline bool si_fromuser(const struct siginfo *info)
 {
 	return info == SEND_SIG_NOINFO ||
@@ -1201,6 +1208,8 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	int from_ancestor_ns = 0;
 
 #ifdef CONFIG_PID_NS
+	// siginfo 구조체가 유저영역에서 전달된 것이라 판단되는 경우
+	// 시그널을 받는 태스크의 active ns에서 시그널을 보내는 current 태스크의 pid
 	from_ancestor_ns = si_fromuser(info) &&
 			   !task_pid_nr_ns(current, task_active_pid_ns(t));
 #endif
@@ -1241,12 +1250,14 @@ static int __init setup_print_fatal_signals(char *str)
 
 __setup("print-fatal-signals=", setup_print_fatal_signals);
 
+// 시그널 @sig를 siginfo 구조체와 함께 태스크 @p가 속한 그룹에게 보낸다.
 int
 __group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
 	return send_signal(sig, info, p, 1);
 }
 
+// 시그널 @sig를 siginfo 구조체와 함께 태스크 @p에게 보낸다.
 static int
 specific_send_sig_info(int sig, struct siginfo *info, struct task_struct *t)
 {
@@ -1799,6 +1810,10 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
  * @for_ptracer is %false, @tsk's group leader notifies to its real parent.
  * If %true, @tsk reports to @tsk->parent which should be the ptracer.
  *
+ * 태스크 @tsk의 부모에게 태스크의 stopped/continued 상태가 변했음을 알린다.
+ * @for_ptracer가 거짓이라면 태스크 @tsk가 속한 스레드그룹리더가 real parent에게
+ * 상태변화를 알린다. 참이라면 태스크 @tsk의 parent에게 보고한다. 이때
+ * parent는 ptracer가 되어야 한다.
  * CONTEXT:
  * Must be called with tasklist_lock at least read locked.
  */
@@ -1811,8 +1826,14 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 	struct sighand_struct *sighand;
 	u64 utime, stime;
 
+	// @for_ptracer가 참이면 ptracer가 @tsk의 부모가 됨
+	// ptracer는 tsk->parent에 연결되어 있는것으로 추정됨.
+	// @TBD
 	if (for_ptracer) {
 		parent = tsk->parent;
+	// @for_ptracer가 거짓이면 real parent를 찾아서
+	// 해당 부모에게 자식의 상태변화를 전달해야 함.
+	// 이게 기본 코드고, 위 코드는 ptracer를 위한 예외코드로 보임..
 	// get_signal()에서 호출할때는 false
 	} else {
 		// 스레드리더태스크..
@@ -1821,7 +1842,7 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 		parent = tsk->real_parent;
 	}
 
-	// siginfo 구조체를 초기화한다.
+	// 부모에게 자식 상태 변화를 전달하기 위해 siginfo 구조체를 초기화한다.
 	// signal nr은 SIGCHLD, errno는 0
 	info.si_signo = SIGCHLD;
 	info.si_errno = 0;
@@ -1829,7 +1850,7 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 	 * see comment in do_notify_parent() about the following 4 lines
 	 */
 	rcu_read_lock();
-	// 부모가 속한 pid ns 레벨에서의 task의 pid를 설정함.
+	// 부모가 속한 pid ns 레벨에서 바라보는 task의 pid를 구함
 	info.si_pid = task_pid_nr_ns(tsk, task_active_pid_ns(parent));
 	info.si_uid = from_kuid_munged(task_cred_xxx(parent, user_ns), task_uid(tsk));
 	rcu_read_unlock();
@@ -1859,13 +1880,21 @@ static void do_notify_parent_cldstop(struct task_struct *tsk,
 	// 부모의 시그널 핸들러 정보를 수정하려고 하는건가?
 	// spinlock을 잡고 irq를 off함. 뒤에 save가 붙으니까 먼가를 save하나?
 	spin_lock_irqsave(&sighand->siglock, flags);
+
+	// 아래 조건을 모두 만족하면 parent에게 SIGCHLD 시그널을 보낸다.
+	// 1) SIGCHLD 시그널에 대한 액션핸들러가 SIG_IGN으로 설정되어 있지 않음
+	// 2) SIGCHLD 시그널에 대한 플래그에 SA_NOCLDSTOP가 설정되어 있음
+	//    -> 자식의 stop 이벤트에 대한 SIGCHLD 시그널을 받기 싫을 때 설정함
 	if (sighand->action[SIGCHLD-1].sa.sa_handler != SIG_IGN &&
 	    !(sighand->action[SIGCHLD-1].sa.sa_flags & SA_NOCLDSTOP))
 		__group_send_sig_info(SIGCHLD, &info, parent);
 	/*
 	 * Even if SIGCHLD is not generated, we must wake up wait4 calls.
 	 */
+	// wait()중인 부모 태스크가 있다면 깨움.
+	// TBD. SIGCHLD를 보냈건 안보냈건 wait중인 태스크를 깨워야 하는 이유는 멀까?
 	__wake_up_parent(tsk, parent);
+	// parent의 시그널 관련된 처리를 끝냈으므로? spinlock을 놓고 irq를 on함.
 	spin_unlock_irqrestore(&sighand->siglock, flags);
 }
 

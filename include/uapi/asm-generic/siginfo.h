@@ -166,7 +166,10 @@ typedef struct siginfo {
 #define SI_TKILL	-6		/* sent by tkill system call */
 #define SI_DETHREAD	-7		/* sent by execve() killing subsidiary threads */
 
+// siginfo 구조체에 설정된 si_code가 0보다 크지 않다면 
+// 유저영역에서 전달된 siginfo 구조체이다.
 #define SI_FROMUSER(siptr)	((siptr)->si_code <= 0)
+// 0보다 크다면 커널코드에서 온 siginfo 구조체다.
 #define SI_FROMKERNEL(siptr)	((siptr)->si_code > 0)
 
 /*
