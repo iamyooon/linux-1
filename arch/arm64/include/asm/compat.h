@@ -299,6 +299,7 @@ struct compat_shmid64_ds {
 	compat_ulong_t __unused5;
 };
 
+// 32bit 태스크인지 체크
 static inline int is_compat_task(void)
 {
 	return test_thread_flag(TIF_32BIT);

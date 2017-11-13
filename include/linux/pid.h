@@ -127,13 +127,20 @@ extern void disable_pid_allocation(struct pid_namespace *ns);
 /*
  * ns_of_pid() returns the pid namespace in which the specified pid was
  * allocated.
+ * ns_of_pid()는 pid구조체를 할당받았던 pidns를 리턴한다.
  *
  * NOTE:
  * 	ns_of_pid() is expected to be called for a process (task) that has
  * 	an attached 'struct pid' (see attach_pid(), detach_pid()) i.e @pid
  * 	is expected to be non-NULL. If @pid is NULL, caller should handle
  * 	the resulting NULL pid-ns.
+ *
+ * ns_of_pid()는 pid 구조체가 연결된 프로세스를 위해 호출될 것이라고 예상한다.
+ * @pid가 NULL이 아니라고 예상하고 @pid가 NULL이라면 pidns를 NULL로 리턴하므로
+ * 호출한 쪽에서 이 경우를 처리해야 한다.
  */
+// pid구조체 @pid를 할당받은 pidns를 리턴하마. pid구조체가 NULL이라면
+// NULL pidns를 리턴한다.
 static inline struct pid_namespace *ns_of_pid(struct pid *pid)
 {
 	struct pid_namespace *ns = NULL;

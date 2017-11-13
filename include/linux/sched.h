@@ -1115,6 +1115,7 @@ struct task_struct {
 	 */
 };
 
+// 태스크 @task의 PIDTYPE_PID의 pid를 구함.
 static inline struct pid *task_pid(struct task_struct *task)
 {
 	return task->pids[PIDTYPE_PID].pid;
@@ -1158,6 +1159,7 @@ static inline pid_t task_pid_nr(struct task_struct *tsk)
 	return tsk->pid;
 }
 
+// pidns에서의 태스크 @tsk가 소유한 pid 구조체의 PIDTYPE_PID 타입의 upid를 구함.
 static inline pid_t task_pid_nr_ns(struct task_struct *tsk, struct pid_namespace *ns)
 {
 	return __task_pid_nr_ns(tsk, PIDTYPE_PID, ns);
@@ -1183,6 +1185,10 @@ static inline pid_t task_tgid_nr(struct task_struct *tsk)
  * Test if a process is not yet dead (at most zombie state)
  * If pid_alive fails, then pointers within the task structure
  * can be stale and must not be dereferenced.
+ *
+ * 태스크가 아직 종료되지 않았는지 체크한다.(거의 대부분 좀비상태임)
+ * 만약 pid_alive가 거짓을 리턴하면, task_struct 구조체안의 포인터는
+ * stale 상태일수 있으므로 deref하면 안된다.
  *
  * Return: 1 if the process is alive. 0 otherwise.
  */

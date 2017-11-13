@@ -498,16 +498,21 @@ struct pid *find_get_pid(pid_t nr)
 }
 EXPORT_SYMBOL_GPL(find_get_pid);
 
+// pid 구조체 @pid의 pidns @ns에서의 upid를 구해서 리턴한다.
+// 만약 pid 구조체 @pid에 pidns @ns와 연관된 upid가 없다면 0을 리턴한다.
 pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 {
 	struct upid *upid;
 	pid_t nr = 0;
 
+	// pid 구조체 @pid가 NULL이 아니고..
+	// pidns @ns의 level보다 pid구조체 @pid가 할당된 pidns의 level이 작지 않다면
 	if (pid && ns->level <= pid->level) {
+		// pid 구조체의 pidns에서의 upid를 구함.
 		upid = &pid->numbers[ns->level];
+		// upid가 할당된 pidns가 @ns와 일치한다면 정수형 pid로 선택한다.
 		if (upid->ns == ns)
 			nr = upid->nr;
-	}
 	return nr;
 }
 EXPORT_SYMBOL_GPL(pid_nr_ns);
@@ -518,20 +523,24 @@ pid_t pid_vnr(struct pid *pid)
 }
 EXPORT_SYMBOL_GPL(pid_vnr);
 
+// pidns에서의 태스크 @task가 소유한 pid 구조체의 @type 타입의 upid를 구함.
 pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 			struct pid_namespace *ns)
 {
 	pid_t nr = 0;
 
 	rcu_read_lock();
+	// pidns가 NULL이라면 current task의 pidns를 구함
 	if (!ns)
 		ns = task_active_pid_ns(current);
+	// 태스크 @task의 PIDTYPE_PID가 NULL이 아니라면
 	if (likely(pid_alive(task))) {
 		if (type != PIDTYPE_PID) {
 			if (type == __PIDTYPE_TGID)
 				type = PIDTYPE_PID;
 			task = task->group_leader;
 		}
+		// pidns에서의 pid 구조체의 upid를 구함.
 		nr = pid_nr_ns(rcu_dereference(task->pids[type].pid), ns);
 	}
 	rcu_read_unlock();
@@ -540,6 +549,7 @@ pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 }
 EXPORT_SYMBOL(__task_pid_nr_ns);
 
+// 태스크 @tsk의 PIDTYPE_PID 타입의 pid를 할당받은 pidns를 구함.
 struct pid_namespace *task_active_pid_ns(struct task_struct *tsk)
 {
 	return ns_of_pid(task_pid(tsk));

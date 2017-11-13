@@ -916,6 +916,9 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 	struct task_struct *t;
 	sigset_t flush;
 
+	// 태스크 @p에 설정된 시그널관련 플래그에 SIGNAL_GROUP_COREDUMP가 설정되어있다면
+	// 전달할 시그널이 SIGKILL이라면 1을, 아니라면 0을 리턴한다.
+	// TBD. 첫번째 if문에서 굳이 SIGNAL_GROUP_EXIT가 들어가야 하나?
 	if (signal->flags & (SIGNAL_GROUP_EXIT | SIGNAL_GROUP_COREDUMP)) {
 		if (!(signal->flags & SIGNAL_GROUP_EXIT))
 			return sig == SIGKILL;
@@ -1106,11 +1109,11 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	int override_rlimit;
 	int ret = 0, result;
 
+	// spinlock이 이미 locked된 상태라면 assert
 	assert_spin_locked(&t->sighand->siglock);
 
 	result = TRACE_SIGNAL_IGNORED;
-	if (!prepare_signal(sig, t,
-			from_ancestor_ns || (info == SEND_SIG_FORCED)))
+	if (!prepare_signal(sig, t, from_ancestor_ns || (info == SEND_SIG_FORCED)))
 		goto ret;
 
 	pending = group ? &t->signal->shared_pending : &t->pending;
@@ -1208,8 +1211,11 @@ static int send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	int from_ancestor_ns = 0;
 
 #ifdef CONFIG_PID_NS
-	// siginfo 구조체가 유저영역에서 전달된 것이라 판단되는 경우
-	// 시그널을 받는 태스크의 active ns에서 시그널을 보내는 current 태스크의 pid
+	// 아래 조건을 모두 만족하는 경우 current 태스크의 pid를 태스크 @t의 PIDTYPE_PID을 할당받은
+	// pidns 에서 구한다.
+	// 1) siginfo 구조체가 유저영역에서 전달된 것이라 판단되는 경우
+	// 2) 시그널을 받는 태스크의 active ns에서 시그널을 보내는 current 태스크의 pid를
+	// 체크해봤을 때 유효하지 않은 경우
 	from_ancestor_ns = si_fromuser(info) &&
 			   !task_pid_nr_ns(current, task_active_pid_ns(t));
 #endif
