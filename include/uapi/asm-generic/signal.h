@@ -71,7 +71,7 @@
 #define SA_NOCLDWAIT	0x00000002
 #define SA_SIGINFO	0x00000004
 #define SA_ONSTACK	0x08000000
-#define SA_RESTART	0x10000000
+#define SA_RESTART	0x10000000 // 주석내용으로 봤을때 과거에는 기본 값이였던 플래그로 추정됨.
 #define SA_NODEFER	0x40000000
 #define SA_RESETHAND	0x80000000
 

@@ -77,8 +77,13 @@
  * If pt_regs.syscallno == NO_SYSCALL, then the thread is not executing
  * a syscall -- i.e., its most recent entry into the kernel from
  * userspace was not via SVC, or otherwise a tracer cancelled the syscall.
+ * pt_regs.syscallno가 NO_SYSCALL이라면, 스레드는 시스템콜을 실해하는 중이 아니였던것임.
+ * 예를 들어, 사용자 공간에서 커널에 가장 최근에 들어간 것은 SVC를 통한 것이 아니거나 
+ * 추적자가 시스템 호출을 취소 한 것이다.
  *
  * This must have the value -1, for ABI compatibility with ptrace etc.
+ * ptrace 등과의 ABI 호환성을 위해 이 값은 반드시 -1이어야 한다.
+ *
  */
 #define NO_SYSCALL (-1)
 
@@ -129,7 +134,8 @@ struct pt_regs {
 	u64 orig_x0;
 #ifdef __AARCH64EB__
 	u32 unused2;
-	s32 syscallno;
+	s32 syscallno;	// 태스크가 동작중에 시스템콜 처리중이라면, 시스템콜 번호가 저장되어 있음
+			// 시스템콜 처리중이 아니라면, NO_SYSCALL(-1)이 저장됨.
 #else
 	s32 syscallno;
 	u32 unused2;
@@ -140,11 +146,16 @@ struct pt_regs {
 	u64 stackframe[2];
 };
 
+// pt_regs에 저장된 레지스터정보중에 syscall no가 NO_SYSCALL이
+// 아니라면 정상적인 시스템콜 번호가 저장되어 있다는 것임
+// 이 경우는 현재 태스크가 시스템콜중인 것임.
 static inline bool in_syscall(struct pt_regs const *regs)
 {
 	return regs->syscallno != NO_SYSCALL;
 }
 
+// syscallno 필드를 NO_SYSCALL로 설정해서 ret_to_user 레이블에서
+// syscall restart 하는 것을 방지한다.
 static inline void forget_syscall(struct pt_regs *regs)
 {
 	regs->syscallno = NO_SYSCALL;

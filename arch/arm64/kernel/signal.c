@@ -680,19 +680,25 @@ static void do_signal(struct pt_regs *regs)
 	/*
 	 * If we were from a system call, check for system call restarting...
 	 */
+	// current 태스크가 시스템콜을 처리하기 위해 커널모드로 진입한 상태에서
+	// 시그널을 처리해야 하는 것이라면...
 	if (in_syscall(regs)) {
+		// 시그널 처리중인 태스크의 pt_regs의 pc와 pc-4는 어딜 가리킬까?
 		continue_addr = regs->pc;
 		restart_addr = continue_addr - (compat_thumb_mode(regs) ? 2 : 4);
+		// 시스템콜이 종료되고 리턴된 값을 구함.
 		retval = regs->regs[0];
 
 		/*
 		 * Avoid additional syscall restarting via ret_to_user.
+		 * ret_to_user 에서의 추가 시스템콜 재시작을 방지하기 위함.
 		 */
 		forget_syscall(regs);
 
 		/*
 		 * Prepare for system call restart. We do this here so that a
 		 * debugger will see the already changed PC.
+		 * 시스템콜 재시작 준비. 디버거는 이미 변경된 PC를 보게 될것이다.
 		 */
 		switch (retval) {
 		case -ERESTARTNOHAND:
@@ -708,18 +714,30 @@ static void do_signal(struct pt_regs *regs)
 	/*
 	 * Get the signal to deliver. When running under ptrace, at this point
 	 * the debugger may change all of our registers.
+	 * 태스크에게 전달할 시그널을 구함. 
 	 */
 	if (get_signal(&ksig)) {
 		/*
 		 * Depending on the signal settings, we may need to revert the
 		 * decision to restart the system call, but skip this if a
 		 * debugger has chosen to restart at a different PC.
+		 * 처리해야 하는 시그널의 설정에 따라 시스템 호출을 다시 시작하라는 결정을
+		 * 되돌려야 할 수도 있지만 디버거가 다른 PC에서 다시 시작하도록 선택한 경우에는
+		 * 건너 뜁니다.
 		 */
-		if (regs->pc == restart_addr &&
-		    (retval == -ERESTARTNOHAND ||
-		     retval == -ERESTART_RESTARTBLOCK ||
-		     (retval == -ERESTARTSYS &&
-		      !(ksig.ka.sa.sa_flags & SA_RESTART)))) {
+		// 태스크가 시스템콜 처리중이여서 pc 값이 systemcall restart를 위해
+		// pc - 4로 바뀌어 있고 아래 조건을 모두 만족하는 경우에는
+		// -EINTR을 리턴값으로 설정하고 continue_addr을 pc로 재설정함.
+		//
+		// 1.시스템 콜에서 리턴된 값이 -ERESTARTNOHAND, -ERESTART_RESTARTBLOCK중 하나인 경우
+		// 2.아래 두 조건을 모두 만족할 경우
+		// 2-1. 실행한 시스템콜에서 -ERESTARTSYS를 리턴
+		// 2-2. 해당 시그널의 시그널핸들러가 SA_RESTART를 사용하지 않음
+		if (regs->pc == restart_addr && 
+			(retval == -ERESTARTNOHAND || retval == -ERESTART_RESTARTBLOCK || 
+				(retval == -ERESTARTSYS && !(ksig.ka.sa.sa_flags & SA_RESTART))
+			)
+		) {
 			regs->regs[0] = -EINTR;
 			regs->pc = continue_addr;
 		}
