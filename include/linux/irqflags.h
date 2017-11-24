@@ -75,6 +75,9 @@ do {						\
  */
 #define raw_local_irq_disable()		arch_local_irq_disable()
 #define raw_local_irq_enable()		arch_local_irq_enable()
+// 1. @flags가 unsigned long이 아니면 컴파일 에러를 발생시킴
+// 2. current cpu의 인터럽트를 비활성화함
+// 3. current cpu의 DAIF 비트셋을 @flags에 저장함.
 #define raw_local_irq_save(flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
@@ -107,6 +110,9 @@ do {						\
 	do { trace_hardirqs_on(); raw_local_irq_enable(); } while (0)
 #define local_irq_disable() \
 	do { raw_local_irq_disable(); trace_hardirqs_off(); } while (0)
+// 1. @flags가 unsigned long이 아니면 컴파일 에러를 발생시킴
+// 2. current cpu의 인터럽트를 비활성화함
+// 3. current cpu의 DAIF 비트셋을 @flags에 저장함.
 #define local_irq_save(flags)				\
 	do {						\
 		raw_local_irq_save(flags);		\

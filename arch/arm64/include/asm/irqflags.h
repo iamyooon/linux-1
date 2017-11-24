@@ -23,27 +23,30 @@
 /*
  * CPU interrupt mask handling.
  */
+// 인터럽트를 비활성화하고 DAIF 필드를 flags에 저장함.
 static inline unsigned long arch_local_irq_save(void)
 {
 	unsigned long flags;
 	asm volatile(
-		"mrs	%0, daif		// arch_local_irq_save\n"
-		"msr	daifset, #2"
+		"mrs	%0, daif		// arch_local_irq_save\n" // DAIF 필드값 읽어서 변수 flags에 저장
+		"msr	daifset, #2"		// DAIF의 I비트를 설정함, 인터럽트 마스킹.
 		: "=r" (flags)
 		:
 		: "memory");
 	return flags;
 }
 
+// 인터럽트를 활성화함.
 static inline void arch_local_irq_enable(void)
 {
 	asm volatile(
-		"msr	daifclr, #2		// arch_local_irq_enable"
+		"msr	daifclr, #2		// arch_local_irq_enable" // DAIF의 I비트 설정을 제거함, 인터럽트 언마스킹
 		:
 		:
 		: "memory");
 }
 
+// DAIF의 I비트를 설정해서 인터럽트를 비활성화함.
 static inline void arch_local_irq_disable(void)
 {
 	asm volatile(
@@ -62,6 +65,7 @@ static inline void arch_local_irq_disable(void)
 /*
  * Save the current interrupt enable state.
  */
+// 현재 DAIF 값을 리턴함.
 static inline unsigned long arch_local_save_flags(void)
 {
 	unsigned long flags;
@@ -76,6 +80,7 @@ static inline unsigned long arch_local_save_flags(void)
 /*
  * restore saved IRQ state
  */
+// @flags에 저장된 DAIF 값을 복원함.
 static inline void arch_local_irq_restore(unsigned long flags)
 {
 	asm volatile(
@@ -85,6 +90,7 @@ static inline void arch_local_irq_restore(unsigned long flags)
 	: "memory");
 }
 
+// @flags값을 조사해서 인터럽트가 비활성화(I비트가 설정)되어 있는지 체크
 static inline int arch_irqs_disabled_flags(unsigned long flags)
 {
 	return flags & PSR_I_BIT;
