@@ -1912,18 +1912,30 @@ int move_freepages_block(struct zone *zone, struct page *page,
 	unsigned long start_pfn, end_pfn;
 	struct page *start_page, *end_page;
 
+	// @page가 나타내는 페이지의 pfn 번호를 구한다.
 	start_pfn = page_to_pfn(page);
+	// @page의 pfn 번호를 pageblock 크기 단위로 round down방식으로 정렬한다.
+	// 왜냐하면, 해당 페이지가 속한 페이지블럭의 시작 page를 구하기 위해서..
 	start_pfn = start_pfn & ~(pageblock_nr_pages-1);
+	// @page가 속한 페이지블럭의 시작 page의 page 구조체 주소를 구함..
 	start_page = pfn_to_page(start_pfn);
+	// @page가 속한 페이지블럭의 마지막 page의 page 구조체 주소를 구함.
 	end_page = start_page + pageblock_nr_pages - 1;
+	// 마지막 page의 pfn도 구함..
 	end_pfn = start_pfn + pageblock_nr_pages - 1;
 
 	/* Do not cross zone boundaries */
+	// @page가 속한 페이지블럭의 첫 page가 @page와 같은 존에 속하지 않는다면..
+	// start_page를 다시 원래 @page로 돌려놓는다.
 	if (!zone_spans_pfn(zone, start_pfn))
 		start_page = page;
+	// end_page가 @page와 같은 존에 속하지 않는다면 
+	// 그냥 리턴한다...
+	// TBD 이게 무슨의미일까? 
 	if (!zone_spans_pfn(zone, end_pfn))
 		return 0;
 
+	// 새롭게 구한 페이지 블럭의 시작 page, 끝 page를 인자로 
 	return move_freepages(zone, start_page, end_page, migratetype,
 								num_movable);
 }

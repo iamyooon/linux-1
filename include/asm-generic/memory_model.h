@@ -51,6 +51,8 @@
 #elif defined(CONFIG_SPARSEMEM_VMEMMAP)
 
 /* memmap is virtually contiguous.  */
+// sparsemem model을 사용할 때는 vmemmap을 기준으로 pfn을 offset으로
+// 사용해서pfn에 매핑된 page 구조체를 구한다.
 #define __pfn_to_page(pfn)	(vmemmap + (pfn))
 #define __page_to_pfn(page)	(unsigned long)((page) - vmemmap)
 
@@ -78,7 +80,13 @@
 #define	__phys_to_pfn(paddr)	PHYS_PFN(paddr)
 #define	__pfn_to_phys(pfn)	PFN_PHYS(pfn)
 
+// page와 매핑된 page frame nr을 구한다.
 #define page_to_pfn __page_to_pfn
+// pfn에 매핑된 page 구조체의 주소를 구한다.
+// 사용하는 메모리 모델에 따라 다른 방식으로 구한다.
+// flatmem - mem_map + (pfn - ARCH_PFN_OFFSETE)
+// discontigmem - node_mem_map + arch_local_page_offset(pfn, nid)
+// sparsemem -> vmemmap + pfn
 #define pfn_to_page __pfn_to_page
 
 #endif /* __ASSEMBLY__ */
