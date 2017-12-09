@@ -178,8 +178,13 @@ static inline __s64 sign_extend64(__u64 value, int index)
 
 static inline unsigned fls_long(unsigned long l)
 {
+	// 인자 @l이 32비트형 데이터타입이라면..
+	// @l에서 1로 설정된 최상위비트 번호를 리턴함.
 	if (sizeof(l) == 4)
 		return fls(l);
+	// 인자 @l이 64비트형 데이터타입이라면...
+	// 시스템이 64비트냐..32비트인지를 unsigned long 타입의 
+	// 크기로 체크하네...
 	return fls64(l);
 }
 

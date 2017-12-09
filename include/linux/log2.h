@@ -63,6 +63,15 @@ unsigned long __roundup_pow_of_two(unsigned long n)
 static inline __attribute__((const))
 unsigned long __rounddown_pow_of_two(unsigned long n)
 {
+	// 변수 @n의 1로 설정된 최상위 비트를 구함
+	// 구한 비트번호에서 1을 뺀 값만큼 1을 left shift한다.
+	// 1을 빼는 이유는 어차피 1을 쉬프트하는거에서 1만큼 shift하는게 들어가 있음..
+	// 1로 설정된 최상위 비트외의 하위 비트는 다 버리므로 라운드다운이 됨.
+	// 예를 들어
+	// 1) n=32(0x20), fls_long(32) -> 6, 1<<5 -> 32
+	// 1) n=33(0x21), fls_long(33) -> 6, 1<<5 -> 32
+	// 1) n=63(0x3F), fls_long(63) -> 6, 1<<5 -> 32
+	// 1) n=64(0x40), fls_long(64) -> 7, 1<<6 -> 64 
 	return 1UL << (fls_long(n) - 1);
 }
 
@@ -167,11 +176,15 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
 
 /**
  * rounddown_pow_of_two - round the given value down to nearest power of two
+ * rounddown_pow_of_two - 2의 거듭제곱에 가깝게 내림
  * @n - parameter
  *
  * round the given value down to the nearest power of two
+ * 인자 @n을 가까운 2의 거듭제곱 값으로 내림한다.
  * - the result is undefined when n == 0
+ * - @n이 0이면 결과 값이 정의되어 있지 않음.
  * - this can be used to initialise global variables from constant data
+ * - 상수에서 전역 변수를 초기화하는데 사용할 수 있다.
  */
 #define rounddown_pow_of_two(n)			\
 (						\

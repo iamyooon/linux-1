@@ -5412,6 +5412,12 @@ static int zone_batchsize(struct zone *zone)
 	 * OK, so we don't know how big the cache is.  So guess.
 	 */
 	batch = zone->managed_pages / 1024;
+	/*
+	 * TBD.batch가 128페이지 이상이면 128로 낮춰야지
+	 * 왜 32로 낮추냐...그럼 머하러 128페이지보다 큰지 물어봐??
+	 * 33 ~ 127 까지는 괜찮은데 128이상은 32로 내려버리는게 무슨 의도지..
+	 * -> 128 이하더라도 1/4하므로 괜찮겠네..
+	 */
 	if (batch * PAGE_SIZE > 512 * 1024)
 		batch = (512 * 1024) / PAGE_SIZE;
 	batch /= 4;		/* We effectively *= 4 below */
@@ -5428,6 +5434,7 @@ static int zone_batchsize(struct zone *zone)
 	 * of pages of one half of the possible page colors
 	 * and the other with pages of the other colors.
 	 */
+	// batch 크기를 2^n - 1 값으로 만든다.
 	batch = rounddown_pow_of_two(batch + batch/2) - 1;
 
 	return batch;
