@@ -1120,9 +1120,15 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 		 */
 		do {
 			batch_free++;
+			/*
+			 * migratetype은 1,2,3순으르 증가되며, 3이 되면 0이 된다.
+			 * 고로 movable, reclaimable, unmovable 순이되겠다.
+			 */
 			if (++migratetype == MIGRATE_PCPTYPES)
 				migratetype = 0;
+			// 해당 migratetype의 page list를 하나 가져옴.
 			list = &pcp->lists[migratetype];
+		// 해당 migratetype의 pcp list가 비어있담면 retry
 		} while (list_empty(list));
 
 		/* This is the only non-empty list. Free them all. */
