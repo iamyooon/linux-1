@@ -79,6 +79,7 @@ struct vm_area_struct;
  *   pages being in one zone (fair zone allocation policy).
  *
  * __GFP_HARDWALL enforces the cpuset memory allocation policy.
+ * __GFP_HARDWALL 는 cpuset 메모리할당 정책을 강제한다.
  *
  * __GFP_THISNODE forces the allocation to be satisified from the requested
  *   node with no fallbacks or placement policy enforcements.

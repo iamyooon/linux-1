@@ -22,9 +22,15 @@ unsigned long int_sqrt(unsigned long x)
 	if (x <= 1)
 		return x;
 
+	// if CONFIG_64BIT, BITS_PER_LONG=64
+	// 1<<62
 	m = 1UL << (BITS_PER_LONG - 2);
+	// 총 31번 반복함
 	while (m != 0) {
+		// 1st) b = 0 + 2^61
+		// 2nd) b = 0 + 2^61
 		b = y + m;
+		// y = y/2
 		y >>= 1;
 
 		if (x >= b) {

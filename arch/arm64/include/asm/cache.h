@@ -30,7 +30,7 @@
 #define ICACHE_POLICY_PIPT	3
 
 #define L1_CACHE_SHIFT		7
-#define L1_CACHE_BYTES		(1 << L1_CACHE_SHIFT)
+#define L1_CACHE_BYTES		(1 << L1_CACHE_SHIFT)	//128
 
 /*
  * Memory returned by kmalloc() may be used for DMA, so we must make
@@ -39,7 +39,7 @@
  * cache before the transfer is done, causing old data to be seen by
  * the CPU.
  */
-#define ARCH_DMA_MINALIGN	L1_CACHE_BYTES
+#define ARCH_DMA_MINALIGN	L1_CACHE_BYTES	//127
 
 #ifndef __ASSEMBLY__
 

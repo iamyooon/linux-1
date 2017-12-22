@@ -6949,6 +6949,7 @@ static void __setup_per_zone_wmarks(void)
 		u64 tmp;
 
 		spin_lock_irqsave(&zone->lock, flags);
+		// min_free_kbytes를 페이지 개수로 환산한 값 * 존이 관리하는 페이지 개수
 		tmp = (u64)pages_min * zone->managed_pages;
 		do_div(tmp, lowmem_pages);
 		if (is_highmem(zone)) {
@@ -6979,6 +6980,9 @@ static void __setup_per_zone_wmarks(void)
 		 * scale factor in proportion to available memory, but
 		 * ensure a minimum size on small systems.
 		 */
+		// (managed_pages / 10000) * wsf + ((managed_pages % 10000) * wsf / 10000)
+		// (managed_pages / 10000) * 10 + ((managed_pages % 10000) * 10 / 10000)
+		// (managed_pages / 1000) + ((managed_pages % 1000) / 10000)
 		tmp = max_t(u64, tmp >> 2,
 			    mult_frac(zone->managed_pages,
 				      watermark_scale_factor, 10000));

@@ -475,6 +475,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_WMARK_MIN		WMARK_MIN
 #define ALLOC_WMARK_LOW		WMARK_LOW
 #define ALLOC_WMARK_HIGH	WMARK_HIGH
+// 워터마크값보다 페이지가 적더라도 할당을 계속 하라는 의미...
 #define ALLOC_NO_WATERMARKS	0x04 /* don't check watermarks at all */
 
 /* Mask to get the watermark bits */

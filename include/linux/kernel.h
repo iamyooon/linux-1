@@ -156,6 +156,7 @@
 /*
  * Multiplies an integer by a fraction, while avoiding unnecessary
  * overflow or loss of precision.
+ * ((x / denom) * numer) + (x % denom) * numer) / denom
  */
 #define mult_frac(x, numer, denom)(			\
 {							\
