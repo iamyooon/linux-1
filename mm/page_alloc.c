@@ -3123,7 +3123,25 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 
 		if (cpusets_enabled() &&
 			(alloc_flags & ALLOC_CPUSET) &&
+<<<<<<< Updated upstream
 			!__cpuset_zone_allowed(zone, gfp_mask))
+=======
+			!cpuset_zone_allowed(zone, gfp_mask))
+				continue;
+		/*
+		 * Distribute pages in proportion to the individual
+		 * zone size to ensure fair page aging.  The zone a
+		 * page was allocated in should have no effect on the
+		 * time the page has in memory before being reclaimed.
+		 */
+		if (alloc_flags & ALLOC_FAIR) {
+			if (!zone_local(ac->preferred_zone, zone))
+				break;
+			// 아래 플래그가 설정되어 있는 존은 할당에 쓸 수 없음..
+			// 다음 존으로 넘어감..
+			if (test_bit(ZONE_FAIR_DEPLETED, &zone->flags)) {
+				nr_fair_skipped++;
+>>>>>>> Stashed changes
 				continue;
 		/*
 		 * When allocating a page cache page for writing, we
