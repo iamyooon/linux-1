@@ -254,16 +254,24 @@ static void wb_min_max_ratio(struct bdi_writeback *wb,
  * free and reclaimable pages, minus some zone reserves to protect
  * lowmem and the ability to uphold the zone's watermarks without
  * requiring writeback.
+ 메모리 존에는, 페이지 캐시로 사용하도록 고려하는 일정량의 페이지가 존재한다.
+ 이 페이지는 본질적으로 존의 워터마크를 지키기 위한 능력과 lowmem을 보호하기
+ 위해 예약해놓은 페이지를 제외한 free 페이지 + reclaim 페이지의 수다.
  *
  * This number of dirtyable pages is the base value of which the
  * user-configurable dirty ratio is the effictive number of pages that
  * are allowed to be actually dirtied.  Per individual zone, or
  * globally by using the sum of dirtyable pages over all zones.
+ dirtyable 페이지의 수는 유저가 설정가능한 실질적으로 dirty 상태가 될 수 있는 페이지의  수에 대한 dirty ratio의 기본값으로 사용된다. 이 값은 존마다 혹은
+전역적으로 모든 존의 dirtyable 페이지의 합으로 사용한다.
  *
  * Because the user is allowed to specify the dirty limit globally as
  * absolute number of bytes, calculating the per-zone dirty limit can
  * require translating the configured limit into a percentage of
  * global dirtyable memory first.
+ dirty limit을 바이트 단위의 절대값을 사용해서 전역적으로 설정할 수 있기 때문에
+ 존의 dirty limit을 계산하는 것은 설정된 제한값을 전역적인 dirtyable memory의
+ 비율로 변환하는게 먼저다.
  */
 
 /**

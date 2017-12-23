@@ -448,9 +448,9 @@ extern void set_pageblock_order(void);
 unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 					    struct list_head *page_list);
 /* The ALLOC_WMARK bits are used as an index to zone->watermark */
-#define ALLOC_WMARK_MIN		WMARK_MIN
-#define ALLOC_WMARK_LOW		WMARK_LOW
-#define ALLOC_WMARK_HIGH	WMARK_HIGH
+#define ALLOC_WMARK_MIN		WMARK_MIN	//0x0
+#define ALLOC_WMARK_LOW		WMARK_LOW	//0x1
+#define ALLOC_WMARK_HIGH	WMARK_HIGH	//0x2
 #define ALLOC_NO_WATERMARKS	0x04 /* don't check watermarks at all */
 
 /* Mask to get the watermark bits */

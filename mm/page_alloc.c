@@ -3164,6 +3164,10 @@ retry:
 	}
 
 	/* This is the last chance, in general, before the goto nopage. */
+	// fastpath 할당시와 다른 점은?
+	// 1) gfp_mask에서 __GFP_IO, __GFP_FS 플래그가 제거되어 있을 수도 있음
+	// 2)kswapd 동작시작..
+	// 
 	page = get_page_from_freelist(gfp_mask, order,
 				alloc_flags & ~ALLOC_NO_WATERMARKS, ac);
 	if (page)
@@ -3728,6 +3732,10 @@ static inline void show_node(struct zone *zone)
 		printk("Node %d ", zone_to_nid(zone));
 }
 
+// available page
+// all free page - reserved page
+//		 + file page cache 50%(minimum)
+//		 + reclaimable slab cache 50%(minimum)
 long si_mem_available(void)
 {
 	long available;
@@ -3740,6 +3748,7 @@ long si_mem_available(void)
 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
 		pages[lru] = global_page_state(NR_LRU_BASE + lru);
 
+	// iterage all zones and accumulate low watermark page value of all zone
 	for_each_zone(zone)
 		wmark_low += zone->watermark[WMARK_LOW];
 
@@ -3753,14 +3762,24 @@ long si_mem_available(void)
 	 * Not all the page cache can be freed, otherwise the system will
 	 * start swapping. Assume at least half of the page cache, or the
 	 * low watermark worth of cache, needs to stay.
+	 모든 페이지 캐시를 비울 수 없으면 시스템이 스와핑을 시작합니다. 
+	 페이지 캐시의 최소 절반 또는 낮은 워터 마크 값의 캐시를 유지해야한다고 가정합니다.
 	 */
 	pagecache = pages[LRU_ACTIVE_FILE] + pages[LRU_INACTIVE_FILE];
+	// 페이지 캐시의 최소 절반은 유지해야 함. 최소 절반은 available size에
+	// 포함안시키는게 무슨 의미일까...
 	pagecache -= min(pagecache / 2, wmark_low);
+	// 전체 free 페이지 개수에서 커널이 급할 때 사용하기 위한 reserved 페이지 개수를 제외하고
+	// 급할 때 회수할 수 있는 페이지캐시도 전체는 아니고, 최대 절반을 free 페이지에 추가함.
 	available += pagecache;
 
 	/*
 	 * Part of the reclaimable slab consists of items that are in use,
 	 * and cannot be freed. Cap this estimate at the low watermark.
+	 슬랩캐시중에도 회수가능하지만 최대 절반은 유지해야 하므로
+	 나머지 최대 절반정도를 available 페이지에 추가함.
+	 TBD. 이게 low watermark 정도의 슬랩은 남겨두겠다는 의미로 보이는데...
+	 low watermark가 기준이 되는 그런 느낌???
 	 */
 	available += global_page_state(NR_SLAB_RECLAIMABLE) -
 		     min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
@@ -6250,12 +6269,14 @@ static void calculate_totalreserve_pages(void)
 	unsigned long reserve_pages = 0;
 	enum zone_type i, j;
 
+	// iterate all online nodes
 	for_each_online_pgdat(pgdat) {
 		for (i = 0; i < MAX_NR_ZONES; i++) {
 			struct zone *zone = pgdat->node_zones + i;
 			long max = 0;
 
 			/* Find valid and maximum lowmem_reserve in the zone */
+			// 
 			for (j = i; j < MAX_NR_ZONES; j++) {
 				if (zone->lowmem_reserve[j] > max)
 					max = zone->lowmem_reserve[j];
