@@ -30,6 +30,7 @@
 /*
  * In the DEBUG case we are using the "NULL fastpath" for mutexes,
  * which forces all calls into the slowpath:
+ * mutex를 디버깅할 때는 fastpath를 사용하지 않고 slowpath를 강제로 사용하게 함.
  */
 #ifdef CONFIG_DEBUG_MUTEXES
 # include "mutex-debug.h"

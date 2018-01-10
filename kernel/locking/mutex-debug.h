@@ -36,7 +36,13 @@ static inline void mutex_clear_owner(struct mutex *lock)
 {
 	lock->owner = NULL;
 }
-
+/*
+ * 1. 인터럽트 컨텍스트에서 spinlock을 잡으려 했다면 warning 출력
+ * 2. irq disable and save
+ * 3. spinlock 잡기
+ * 4. spinlock의 owner인 mutex의 magic이 비정상이라면 warning 출력
+ * irq enable은 spinlock을 릴리즈할 때 할것임..
+ */
 #define spin_lock_mutex(lock, flags)			\
 	do {						\
 		struct mutex *l = container_of(lock, struct mutex, wait_lock); \
@@ -47,6 +53,11 @@ static inline void mutex_clear_owner(struct mutex *lock)
 		DEBUG_LOCKS_WARN_ON(l->magic != l);	\
 	} while (0)
 
+/*
+ * 1. spinlock 놓기
+ * 2. irq enable and restore
+ * 3. 선점이 필요하다면 선점을 시도함
+ */
 #define spin_unlock_mutex(lock, flags)				\
 	do {							\
 		arch_spin_unlock(&(lock)->rlock.raw_lock);	\

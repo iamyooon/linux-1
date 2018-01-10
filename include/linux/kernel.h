@@ -59,8 +59,13 @@
  * as wide as the result!), and we want to evaluate the macro
  * arguments just once each.
  */
+// x타입으로 y-1한다.
 #define __round_mask(x, y) ((__typeof__(x))((y)-1))
+// x |= ((y-1)+1)
+// i.e) y = PAGE_SIZE, PAGE_SIZE 승수단위로올림.
 #define round_up(x, y) ((((x)-1) | __round_mask(x, y))+1)
+// x &= ~(y-1)
+// i.e) y = PAGE_SIZE, PAGE_SIZE 승수단위의 값만 남김.
 #define round_down(x, y) ((x) & ~__round_mask(x, y))
 
 #define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
@@ -166,6 +171,11 @@ struct completion;
 struct pt_regs;
 struct user;
 
+//arm64에서는 이 커널 설정을 사용하지 않음.
+//그렇다면 might_resched()는 아무것도 안한다는 것..
+// might_resched()는 voluntary 선점만 가능한 반응성이 좋지 않은 커널에서
+// cpu를 오래 잡고 있는 태스크가 중간중간 반응성을 보장하기 위해
+// 혹은 cpu를 양보하기 위해 놔두는 설비라고 봄면 되겠다.
 #ifdef CONFIG_PREEMPT_VOLUNTARY
 extern int _cond_resched(void);
 # define might_resched() _cond_resched()
