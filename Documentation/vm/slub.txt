@@ -68,7 +68,7 @@ In case you forgot to enable debugging on the kernel command line: It is possibl
 /sys/kernel/slab/<slab name>/
 
 Look at the writable files. Writing 1 to them will enable the corresponding debug option. All options can be set on a slab that does not contain objects. If the slab already contains objects then sanity checks and tracing may only be enabled. The other options may cause the realignment of objects.
-write 가능한 파일을 보자. 1을 쓰면 해당 디버그 옵션이 활성화된다. 모든 옵션은 객체가 포함되지 않은 슬랩에 설정할 수 있다. 슬랩에 이미 객체가 있다면 sanitize 체크와 추적을 사용할 수 있다. 다른 옵션을 사용하면 객체의 realign이 발생할 수 있다.
+write 가능한 파일을 보자. 1을 쓰면 해당 디버그 옵션이 활성화된다. 모든 옵션은 오브젝트가 포함되지 않은 슬랩에 설정할 수 있다. 슬랩에 이미 오브젝트가 있다면 sanitize 체크와 추적을 사용할 수 있다. 다른 옵션을 사용하면 오브젝트의 realign이 발생할 수 있다.
 
 Careful with tracing: It may spew out lots of information and never stop if used on the wrong slab.
 주의깊게 추적해야 한다 : 많은 정보를 추출 할 수 있으며 잘못된 슬랩에 사용하면 멈추지 않을 수 있다.
@@ -78,24 +78,25 @@ Slab merging
 ------------
 
 If no debug options are specified then SLUB may merge similar slabs together in order to reduce overhead and increase cache hotness of objects.  slabinfo -a displays which slabs were merged together.
-디버그 옵션을 사용하지 않으면 SLUB은 오버 헤드를 줄이고 객체의 cache hotness를 높이기 위해 유사한 슬랩을 병합 할 수 있다. slabinfo -a는 어떤 슬랩이 함께 병합되었는지 표시한다.
+디버그 옵션을 사용하지 않으면 SLUB은 오버 헤드를 줄이고 오브젝트의 cache hotness를 높이기 위해 유사한 슬랩을 병합 할 수 있다. slabinfo -a는 어떤 슬랩이 함께 병합되었는지 표시한다.
 
 Slab validation
 슬랩 유효성
 ---------------
 
 SLUB can validate all object if the kernel was booted with slub_debug. In order to do so you must have the slabinfo tool. Then you can do
-SLUB은 slub_debug로 커널을 부팅 한 경우 모든 객체의 유효성을 검사 할 수 있다. 그렇게 하려면 slabinfo 도구가 있어야한다. 도구를 구하면 아래와 같이 사용할 수 있다.
+SLUB은 slub_debug로 커널을 부팅 한 경우 모든 오브젝트의 유효성을 검사 할 수 있다. 그렇게 하려면 slabinfo 도구가 있어야한다. 도구를 구하면 아래와 같이 사용할 수 있다.
 
 slabinfo -v
 
 which will test all objects. Output will be generated to the syslog.
-위 명령어는 모든 슬랩 객체의 유효성을 체크한다. 체크 결과는 syslog로 출력된다.
+위 명령어는 모든 슬랩 오브젝트의 유효성을 체크한다. 체크 결과는 syslog로 출력된다.
 
 This also works in a more limited way if boot was without slab debug.  In that case slabinfo -v simply tests all reachable objects. Usually these are in the cpu slabs and the partial slabs. Full slabs are not tracked by SLUB in a non debug situation.
-부트가 슬랩 디버그가 아닌 경우이 방법은 더 제한된 방식으로 작동합니다. 이 경우 slabinfo -v는 모든 도달 가능한 객체를 테스트합니다. 보통 이들은 CPU 슬라브와 부분 슬랩에 있습니다. SLUB는 디버그가 아닌 상황에서 전체 슬랩을 추적하지 않습니다.
+slab debug 없이 부팅된 경우 이 방법은 더 제한된 방식으로 작동한다. 이 경우 slabinfo -v는 모든 도달 가능한 오브젝트를 테스트한다. 보통 이들은 CPU 슬랩과 partial 슬랩에 있다. SLUB는 디버그가 활성화되지 않은 상황에서는 전체 슬랩을 추적하지 않는다.
 
 Getting more performance
+슬랩 성능 높히기
 ------------------------
 
 To some degree SLUB's performance is limited by the need to take the list_lock once in a while to deal with partial slabs. That overhead is governed by the order of the allocation for each slab. The allocations can be influenced by kernel parameters:
@@ -106,15 +107,16 @@ slub_min_order=x		(default 0)
 slub_max_order=x		(default 3 (PAGE_ALLOC_COSTLY_ORDER))
 
 slub_min_objects allows to specify how many objects must at least fit into one slab in order for the allocation order to be acceptable.  In general slub will be able to perform this number of allocations on a slab without consulting centralized resources (list_lock) where contention may occur.
-slub_min_objects는 할당 순서를 수용 할 수 있도록 적어도 하나의 슬랩에 들어가야하는 객체 수를 지정할 수 있습니다. 일반적으로 slub은 논쟁이 일어날 수있는 중앙 리소스 (list_lock)를 참조하지 않고 슬랩에서이 할당 횟수를 수행 할 수 있습니다.
+slub_min_objects는 할당 순서를 수용 할 수 있도록 적어도 하나의 슬랩에 들어가야하는 오브젝트 수를 지정할 수 있습니다. 일반적으로 slub은 논쟁이 일어날 수있는 중앙 리소스 (list_lock)를 참조하지 않고 슬랩에서이 할당 횟수를 수행 할 수 있습니다.
 
 slub_min_order specifies a minim order of slabs. A similar effect like slub_min_objects.
 slub_min_order는 슬랩의 최소 차수를 지정합니다. slub_min_objects와 비슷한 효과.
 
 slub_max_order specified the order at which slub_min_objects should no longer be checked. This is useful to avoid SLUB trying to generate super large order pages to fit slub_min_objects of a slab cache with large object sizes into one high order page. Setting command line parameter debug_guardpage_minorder=N (N > 0), forces setting slub_max_order to 0, what cause minimum possible order of slabs allocation.
-slub_max_order는 slub_min_objects가 더 이상 점검되지 않아야하는 순서를 지정했습니다. 이는 SLUB가 대형 객체 페이지를 가진 슬랩 캐시의 slub_min_objects를 하나의 고 순서 페이지에 맞추기 위해 초대형 대량 주문 페이지를 생성하는 것을 피하는 데 유용합니다. 명령 줄 매개 변수 debug_guardpage_minorder = N (N> 0)을 설정하면 slub_max_order를 0으로 설정하고 최소 가능한 슬랩 순서를 결정합니다.
+slub_max_order는 slub_min_objects가 더 이상 점검되지 않아야하는 순서를 지정했습니다. 이는 SLUB가 대형 오브젝트 페이지를 가진 슬랩 캐시의 slub_min_objects를 하나의 고 순서 페이지에 맞추기 위해 초대형 대량 주문 페이지를 생성하는 것을 피하는 데 유용합니다. 명령 줄 매개 변수 debug_guardpage_minorder = N (N> 0)을 설정하면 slub_max_order를 0으로 설정하고 최소 가능한 슬랩 순서를 결정합니다.
 
 SLUB Debug output
+슬럽 디버깅 결과
 -----------------
 
 Here is a sample of slub debug output:
@@ -158,13 +160,13 @@ Bytes b4 0xc90f6d10:  00 00 00 00 00 00 00 00 5a 5a 5a 5a 5a 5a 5a 5a ........ZZ
 FIX kmalloc-8: Restoring Redzone 0xc90f6d28-0xc90f6d2b=0xcc
 
 If SLUB encounters a corrupted object (full detection requires the kernel to be booted with slub_debug) then the following output will be dumped into the syslog:
-SLUB가 손상된 객체를 만난다면 (전체 탐지를 위해서는 slub_debug로 커널을 부팅해야 함) 다음 출력이 syslog에 덤프됩니다.
+SLUB에 오염된 오브젝트가 발생하면(전체 탐지를 위해서는 slub_debug 파라미터를 사용해서 커널을 부팅해야 함) 다음 내용이 syslog에 출력된다.
 
 1. Description of the problem encountered
 1. 발생한 문제에 대한 설명
 
 This will be a message in the system log starting with
-이것은 시스템 로그에 다음으로 시작하는 메시지입니다.
+아래 메세지는 시스템 로그의 시작부분에 출력된다.
 
 ===============================================
 BUG <slab cache affected>: <What went wrong>
@@ -179,124 +181,138 @@ INFO: Freed in <kernel function> age=<jiffies since free> cpu=<freed by cpu>
 	 pid=<pid of the process>
 
 (Object allocation / free information is only available if SLAB_STORE_USER is set for the slab. slub_debug sets that option)
-(객체 할당 / 자유 정보는 slab_STORE_USER가 슬랩에 대해 설정된 경우에만 사용할 수 있으며 slub_debug는 해당 옵션을 설정합니다)
+(오브젝트 할당/해제 정보는 슬랩에 SLAB_STORE_USER가 설정된 경우에만 사용할 수 있으며 slub_debug 파라미터에서 해당 옵션(U)을 설정할 수 있다.
 
 2. The object contents if an object was involved.
-2. 객체가 관련된 경우 객체 내용.
+2. 슬랩 오브젝트의 내용(오브젝트가 관련된 경우)
 
 Various types of lines can follow the BUG SLUB line:
-다양한 유형의 행이 BUG SLUB 행을 따라갈 수 있습니다.
+다양한 유형의 행이 BUG SLUB 행 결과가 뒤따라 출력될 수 있다.
 
 Bytes b4 <address> : <bytes>
-	Shows a few bytes before the object where the problem was detected.  Can be useful if the corruption does not stop with the start of the object.
-        문제가 발견 된 객체 앞에 몇 바이트를 표시합니다. 개체의 시작으로 손상이 멈추지 않으면 유용 할 수 있습니다.
+Shows a few bytes before the object where the problem was detected.  Can be useful if the corruption does not stop with the start of the object.
+문제가 발견 된 오브젝트 앞 몇 바이트를 출력한다. corruption이 오브젝트의 시작주소 전에 멈추지 않는다면 유용 할 수 있다.
 
 Object <address> : <bytes>
-	The bytes of the object. If the object is inactive then the bytes typically contain poison values. Any non-poison value shows a corruption by a write after free.
-        객체의 바이트. 객체가 비활성 상태이면 바이트는 일반적으로 포이즌 값을 포함합니다. 모든 독성이없는 값은 무료로 쓰기로 인한 손상을 보여줍니다.
-Redzone <address> : <bytes>
-	The Redzone following the object. The Redzone is used to detect writes after the object. All bytes should always have the same value. If there is any deviation then it is due to a write after the object boundary.
-        대상을 따르는 Redzone. Redzone은 객체 뒤에 쓰기를 감지하는 데 사용됩니다. 모든 바이트는 항상 같은 값을 가져야합니다. 편차가있는 경우 오브젝트 경계 다음에 쓰기가 발생합니다.
+The bytes of the object. If the object is inactive then the bytes typically contain poison values. Any non-poison value shows a corruption by a write after free.
+오브젝트의 바이트단위 크기를 나타냄. 오브젝트가 비활성 상태이면 바이트는 일반적으로 포이즌 영역의 크기를 포함한다. poison 영역에 쓰이지 않는 값이 슬랩 해제 후에 쓰여진 corruption을 나타낸다.
 
-	(Redzone information is only available if SLAB_RED_ZONE is set.  slub_debug sets that option)
-        (Redzone 정보는 SLAB_RED_ZONE이 설정된 경우에만 사용할 수 있으며 slub_debug는 해당 옵션을 설정합니다)
+Redzone <address> : <bytes>
+The Redzone following the object. The Redzone is used to detect writes after the object. All bytes should always have the same value. If there is any deviation then it is due to a write after the object boundary.
+슬랩 오브젝트 뒤에 위치하는 레드존을 나타낸다. 레드존은 오브젝트 영역 다음 영역에 대한 쓰기를 감지하는데 사용된다. 레드존의 모든 바이트는 항상 같은 값을 가져야한다. 문제가 있는 경우 오브젝트 경계 다음(레드존)에 쓰기가 발생한다.
+
+(Redzone information is only available if SLAB_RED_ZONE is set.  slub_debug sets that option)
+(Redzone 정보는 SLAB_RED_ZONE이 설정된 경우에만 사용할 수 있으며 slub_debug에서 이 옵션(Z)을 설정할 수 있다.
 
 Padding <address> : <bytes>
-	Unused data to fill up the space in order to get the next object properly aligned. In the debug case we make sure that there are at least 4 bytes of padding. This allows the detection of writes before the object.
-        사용되지 않은 데이터가 공간을 채워서 다음 객체를 올바르게 정렬시킵니다. 디버그의 경우 적어도 4 바이트의 패딩이 있는지 확인합니다. 이렇게하면 객체 앞에 쓰기를 탐지 할 수 있습니다.
+Unused data to fill up the space in order to get the next object properly aligned. In the debug case we make sure that there are at least 4 bytes of padding. This allows the detection of writes before the object.
+사용되지 않은 데이터로 공간을 채워서 다음 오브젝트를 올바르게 정렬시킨다. 디버깅의 경우 적어도 4 바이트의 패딩이 있는지 확인한다. 이렇게 하면 슬랩 오브젝트를 넘어선 쓰기를 탐지 할 수 있다.
 
 
 3. A stackdump
 3. 스택 덤프
 
 The stackdump describes the location where the error was detected. The cause of the corruption is may be more likely found by looking at the function that allocated or freed the object.
-스택 덤프는 오류가 발견 된 위치를 설명합니다. 손상을 일으킨 원인은 개체를 할당하거나 해제 한 기능을 살펴보면 더 쉽게 발견 될 수 있습니다.
+스택 덤프는 에러가 발견된 함수 위치를 나타낸다. 오염을 일으킨 원인은 오브젝트를 할당하거나 해제 한 함수를 살펴보면 더 쉽게 발견 될 수 있다.
 
 4. Report on how the problem was dealt with in order to ensure the continued operation of the system.
-4. 시스템의 지속적인 작동을 보장하기 위해 문제가 어떻게 처리되었는지보고하십시오.
+4. 시스템의 지속적인 작동을 보장하기 위해 문제가 어떻게 처리되었는지 출력한다.
 
 These are messages in the system log beginning with
-이들은 시스템 로그에있는 메시지입니다.
+이 로그들은 아래와 같은 로그와 함께 출력된다.
 
 FIX <slab cache affected>: <corrective action taken>
 
 In the above sample SLUB found that the Redzone of an active object has been overwritten. Here a string of 8 characters was written into a slab that has the length of 8 characters. However, a 8 character string needs a terminating 0. That zero has overwritten the first byte of the Redzone field.  After reporting the details of the issue encountered the FIX SLUB message tells us that SLUB has restored the Redzone to its proper value and then system operations continue.
-위 샘플에서 SLUB은 활성 객체의 Redzone이 덮어 쓴 것을 발견했습니다. 8 자 길이의 슬랩에 8 자의 문자열이 기록되었습니다. 그러나 8 자 문자열은 종료가 필요합니다. 0은 Redzone 필드의 첫 번째 바이트를 덮어 씁니다. 문제의 세부 사항을보고 한 후 FIX SLUB 메시지는 SLUB이 Redzone을 적절한 값으로 복원 한 다음 시스템 작동이 계속된다는 것을 알려줍니다.
+위 샘플에서 SLUB은 활성 오브젝트의 레드존이 덮어쓰기 된것을 발견했다. 8 자 길이의 슬랩에 8 자의 문자열이 기록되었다. 그러나 8 자 문자열은 0으로 종료되어야 한다. 0은 레드존의 첫 번째 바이트를 덮어 쓴다. 문제의 세부 사항을 출력한 후 FIX SLUB 메시지는 SLUB이 레드존을 적절한 값으로 복원 한 다음 시스템 작동이 계속된다는 것을 알려준다.
 
 Emergency operations:
-비상 운영 :
+비상시의 동작:
 ---------------------
 
 Minimal debugging (sanity checks alone) can be enabled by booting with
-부팅시 최소한의 디버깅 (온 전성 검사 만)을 활성화 할 수 있습니다.
+부팅시 최소한의 디버깅만(sanity 체크)을 활성화 할 수 있다.
 
 	slub_debug=F
 
 This will be generally be enough to enable the resiliency features of slub which will keep the system running even if a bad kernel component will keep corrupting objects. This may be important for production systems.  Performance will be impacted by the sanity checks and there will be a continual stream of error messages to the syslog but no additional memory will be used (unlike full debugging).
-이것은 일반적으로 나쁜 커널 구성 요소가 손상된 객체를 유지하더라도 시스템을 계속 실행하는 slub의 복원 기능을 사용하기에 충분합니다. 이는 프로덕션 시스템에서 중요 할 수 있습니다. 성능은 온 전성 검사의 영향을받을 것이고 syslog에 대한 오류 메시지가 계속해서 발생하지만 전체 디버깅과 달리 추가 메모리는 사용되지 않습니다.
+일반적으로 이 설정은 만약 잘못된 커널 코드에 의해 corrupting 오브젝트가 유지되더라도 시스템이 계속 동작하게 해주는 slub의 복원기능을 활성화하는데 충분하다.이는 프로덕션 시스템에서 중요 할 수 있다. 성능은 sanity 검사의 영향을 받을 것이고 syslog에 오류 메시지가 계속해서 발생하지만 전체 디버깅과 달리 추가 메모리는 사용되지 않는다.
 
 No guarantees. The kernel component still needs to be fixed. Performance may be optimized further by locating the slab that experiences corruption and enabling debugging only for that cache
-보증은 없습니다. 커널 구성 요소는 여전히 수정해야합니다. 손상을 경험 한 슬라브를 찾고 해당 캐시에 대해서만 디버깅을 활성화하여 성능을 더욱 최적화 할 수 있습니다
+보장되는 것은 없다. 잘못된 커널 코드는 여전히 수정해야 한다. 오염된 적이 있던 슬랩을 찾고 해당 캐시에 대해서만 디버깅을 활성화하여 성능을 더욱 최적화 할 수 있다
 
+예를 들어,
 I.e.
-
 	slub_debug=F,dentry
 
 If the corruption occurs by writing after the end of the object then it may be advisable to enable a Redzone to avoid corrupting the beginning of other objects.
-객체가 끝난 후 작성하여 손상이 발생하면 다른 객체의 시작 부분이 손상되지 않도록 Redzone을 활성화하는 것이 좋습니다.
+오브젝트의 영역을 벗어난 곳에 대한 쓰기접근에 의해 오염이 발생하면 다른 오브젝트의 시작 부분이 오염되지 않도록 레드존을 활성화하는 것이 좋다.
 
 	slub_debug=FZ,dentry
 
 Extended slabinfo mode and plotting
+slabinfo의 확장모드와 플로팅
 -----------------------------------
 
 The slabinfo tool has a special 'extended' ('-X') mode that includes:
- - Slabcache Totals
- - Slabs sorted by size (up to -N <num> slabs, default 1)
- - Slabs sorted by loss (up to -N <num> slabs, default 1)
+slabinfo 툴은 아래를 포함한 특별한 extended mode를 지원한다.
+
+ - 총 슬랩캐시(Slabcache Totals)
+ - 사이즈로 정렬한 슬랩리스트(Slabs sorted by size (up to -N <num> slabs, default 1))
+ - loss를 기준으로 정렬할 슬랩리스트(Slabs sorted by loss (up to -N <num> slabs, default 1))
 
 Additionally, in this mode slabinfo does not dynamically scale sizes (G/M/K) and reports everything in bytes (this functionality is also available to other slabinfo modes via '-B' option) which makes reporting more precise and accurate. Moreover, in some sense the `-X' mode also simplifies the analysis of slabs' behaviour, because its output can be plotted using the slabinfo-gnuplot.sh script. So it pushes the analysis from looking through the numbers (tons of numbers) to something easier -- visual analysis.
-또한이 모드에서 slabinfo는 동적으로 크기 (G / M / K)를 조정하지 않고 모든 것을 바이트 단위로보고합니다 (이 기능은 '-B'옵션을 통해 다른 slabinfo 모드에서도 사용할 수 있음). 또한, 어떤 의미에서`-X '모드는 slabinfo-gnuplot.sh 스크립트를 사용하여 출력을 플로트 할 수 있기 때문에 슬라브의 동작 분석을 단순화합니다. 따라서 분석을 숫자 (수 톤)를 통해 보는 것에서 더 쉬운 것으로 시각적 분석으로이 끕니다.
+또한 이 모드에서 slabinfo는 동적으로 크기(G/M/K)를 조정하지 않고 모든 것을 바이트 단위로 보고한다(이 기능은 '-B'옵션을 통해 다른 slabinfo 모드에서도 사용할 수 있음). 이 것은 출력 내용을 더욱 더 정밀하고 정확하게 만들어준다. 또한 어떤 의미에서 '-X' 모드는 slabinfo-gnuplot.sh 스크립트를 사용하여 출력을 plot 할 수 있기 때문에 슬랩의 동작 분석을 단순하게 한다. 따라서 숫자(많은)를 통해 분석하는 것에서 좀 더 쉬운 시각적은 분석을 하게 한다.
 
-To generate plots:
+plot을 만들기 위해서는(To generate plots):
+
 a) collect slabinfo extended records, for example:
+a) sliabinfo의 extended record를 수집한다, 예를 들면 아래와 같다.:
 
   while [ 1 ]; do slabinfo -X >> FOO_STATS; sleep 1; done
 
 b) pass stats file(-s) to slabinfo-gnuplot.sh script:
+b) stats 파일을 slabinfo-gnuplot.sh 스크립트에 전달한다:
+
   slabinfo-gnuplot.sh FOO_STATS [FOO_STATS2 .. FOO_STATSN]
 
 The slabinfo-gnuplot.sh script will pre-processes the collected records and generates 3 png files (and 3 pre-processing cache files) per STATS file:
-slabinfo-gnuplot.sh 스크립트는 수집 된 레코드를 사전 처리하고 STATS 파일 당 3 개의 png 파일 (3 개의 사전 처리 캐시 파일)을 생성합니다.
+slabinfo-gnuplot.sh 스크립트는 수집 된 레코드를 사전 처리하고 STATS 파일 당 아래 3 개 png 파일 (3 개의 사전 처리 캐시 파일)을 생성한다.
+
  - Slabcache Totals: FOO_STATS-totals.png
  - Slabs sorted by size: FOO_STATS-slabs-by-size.png
  - Slabs sorted by loss: FOO_STATS-slabs-by-loss.png
 
 Another use case, when slabinfo-gnuplot can be useful, is when you need to compare slabs' behaviour "prior to" and "after" some code modification.  To help you out there, slabinfo-gnuplot.sh script can 'merge' the `Slabcache Totals` sections from different measurements. To visually compare N plots:
-slabinfo-gnuplot이 유용 할 수있는 또 다른 사용 사례는 일부 코드 수정 이전에 슬랩 동작을 "이전"과 "후"비교해야 할 때입니다. 거기서 당신을 도울 수 있도록 slabinfo-gnuplot.sh 스크립트는 다른 측정의 Slabcache Totals 섹션을 '병합'할 수 있습니다. 시각적으로 N 개의 그림을 비교하려면 :
+slabinfo-gnuplot 스크릅트가 유용 할 수있는 또 다른 사용 사례는 일부 코드수정에 대한  슬랩 동작을 "이전"과 "후"로 비교해야 할 때이다. 거기서 당신을 도울 수 있도록 slabinfo-gnuplot.sh 스크립트는 다른 측정의 Slabcache Totals 섹션을 '병합'할 수 있다. 시각적으로 N 개의 그림을 비교하려면 :
 
 a) Collect as many STATS1, STATS2, .. STATSN files as you need
-a) 필요한만큼 STATS1, STATS2, .. STATSN 파일을 수집하십시오.
+a) 필요한만큼 STATS1, STATS2, .. STATSN 파일을 수집하기.
+
   while [ 1 ]; do slabinfo -X >> STATS<X>; sleep 1; done
 
 b) Pre-process those STATS files
-b) 해당 STATS 파일을 사전 처리합니다.
+b) 해당 STATS 파일을 사전 처리하기
+
   slabinfo-gnuplot.sh STATS1 STATS2 .. STATSN
 
 c) Execute slabinfo-gnuplot.sh in '-t' mode, passing all of the generated pre-processed *-totals
-c) '-t'모드에서 slabinfo-gnuplot.sh를 실행하여 생성 된 모든 전처리 된 * 합계를 전달합니다
+c) '-t'모드에서 slabinfo-gnuplot.sh를 실행하여 생성 된 모든 전처리 된 *-totals를 전달
+
   slabinfo-gnuplot.sh -t STATS1-totals STATS2-totals .. STATSN-totals
 
 This will produce a single plot (png file).
-그러면 단일 플롯 (png 파일)이 생성됩니다.
+이 절차는 단일 플롯(png 파일)을 생성한다.
 
 Plots, expectedly, can be large so some fluctuations or small spikes can go unnoticed. To deal with that, `slabinfo-gnuplot.sh' has two options to 'zoom-in'/'zoom-out':
-플롯은 예상대로 커질 수 있으므로 약간의 변동이나 작은 스파이크가 눈에 띄지 않을 수 있습니다. 이를 처리하기 위해`slabinfo-gnuplot.sh '에는'zoom-in '/'zoom-out '의 두 가지 옵션이 있습니다 :
+플롯은 커질 수 있으므로 약간의 변동이나 작은 스파이크가 눈에 띄지 않을 수 있다. 이를 처리하기 위해 slabinfo-gnuplot.sh 스크립트에는 'zoom-in'/'zoom-out' 두 가지 옵션이 있다 :
 
  a) -s %d,%d  overwrites the default image width and heigh
- a) -s % d, % d은 (는) 기본 이미지 너비와 높이를 덮어 씁니다.
+ a) -s %d,%d 는 기본 이미지 너비와 높이를 덮어쓴다.
+
  b) -r %d,%d  specifies a range of samples to use (for example, in `slabinfo -X >> FOO_STATS; sleep 1;' case, using a "-r 40,60" range will plot only samples collected between 40th and 60th seconds).
- b) -r % d, % d는 사용할 샘플 범위를 지정합니다 (예 :`slabinfo -X >> FOO_STATS; sleep 1; '경우, "-r 40,60"범위를 사용하면 수집 된 샘플 만 플롯합니다) 40 초에서 60 초 사이).
+ b) -r %d,%d는 사용할 샘플 범위를 지정한다(예 :'slabinfo -X >> FOO_STATS; sleep 1;' 경우, "-r 40,60" 범위를 사용하면 수집 된 샘플 만 플롯한다).
+
 
 Christoph Lameter, May 30, 2007
 Sergey Senozhatsky, October 23, 2015
