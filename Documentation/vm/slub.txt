@@ -100,26 +100,27 @@ Getting more performance
 ------------------------
 
 To some degree SLUB's performance is limited by the need to take the list_lock once in a while to deal with partial slabs. That overhead is governed by the order of the allocation for each slab. The allocations can be influenced by kernel parameters:
-SLUB의 성능은 부분 슬랩을 처리하기 위해 list_lock을 잠시 동안 사용해야 할 필요성에 의해 어느 정도 제한됩니다. 그 오버 헤드는 각 슬랩에 대한 할당 순서에 의해 결정됩니다. 할당은 커널 매개 변수의 영향을받을 수 있습니다.
+슬럽의 성능은 partial 슬랩을 처리하는 동안에 잡아야 하는 list_lock에 의해 약간 제한된다. 그 오버 헤드는 각 슬랩에 대한 할당 순서에 의해 결정된다. 할당은 아래의 커널 파라미터의 영향을 받을 수 있다.
 
 slub_min_objects=x		(default 4)
 slub_min_order=x		(default 0)
 slub_max_order=x		(default 3 (PAGE_ALLOC_COSTLY_ORDER))
 
 slub_min_objects allows to specify how many objects must at least fit into one slab in order for the allocation order to be acceptable.  In general slub will be able to perform this number of allocations on a slab without consulting centralized resources (list_lock) where contention may occur.
-slub_min_objects는 할당 순서를 수용 할 수 있도록 적어도 하나의 슬랩에 들어가야하는 오브젝트 수를 지정할 수 있습니다. 일반적으로 slub은 논쟁이 일어날 수있는 중앙 리소스 (list_lock)를 참조하지 않고 슬랩에서이 할당 횟수를 수행 할 수 있습니다.
+slub_min_objects 파라미터는 허용가능한 할당 순서를 위해 얼마나 많은 오브젝트가 최소한 하나의 슬랩에 들어가야 하는지를 지정할 수 있다. 일반적으로 슬럽은 발생할 수 있는 lock contention이 발생할 수 있는 list_lock을 사용하는 중앙 자원을 참조하지 않고 이런 류의 할당을 처리할 수 있다.
 
 slub_min_order specifies a minim order of slabs. A similar effect like slub_min_objects.
-slub_min_order는 슬랩의 최소 차수를 지정합니다. slub_min_objects와 비슷한 효과.
+slub_min_order 파라미터는 슬랩의 최소 order를 지정한다. slub_min_objects와 비슷한 효과를 나타낸다.
 
 slub_max_order specified the order at which slub_min_objects should no longer be checked. This is useful to avoid SLUB trying to generate super large order pages to fit slub_min_objects of a slab cache with large object sizes into one high order page. Setting command line parameter debug_guardpage_minorder=N (N > 0), forces setting slub_max_order to 0, what cause minimum possible order of slabs allocation.
-slub_max_order는 slub_min_objects가 더 이상 점검되지 않아야하는 순서를 지정했습니다. 이는 SLUB가 대형 오브젝트 페이지를 가진 슬랩 캐시의 slub_min_objects를 하나의 고 순서 페이지에 맞추기 위해 초대형 대량 주문 페이지를 생성하는 것을 피하는 데 유용합니다. 명령 줄 매개 변수 debug_guardpage_minorder = N (N> 0)을 설정하면 slub_max_order를 0으로 설정하고 최소 가능한 슬랩 순서를 결정합니다.
+slub_max_order 파라미터는 slub_min_objects 파라미터가 더이상 체크되지 않을 order를 나타낸다. 이는 슬럽이 큰 크기를 오브젝트를 가진 슬랩 캐시의 slub_min_objects 파라미터에 맞추기 위해 super large order pages를 생성하는 시도를 피할 수 있어서 유용하다. 커맨드라인 파라미터 debug_guardpage_minorder = N (N> 0)을 설정하면 slub_max_order를 0으로 설정하고 슬랩할당시에 사용한 최소한의 possible order를 결정한다.
 
 SLUB Debug output
 슬럽 디버깅 결과
 -----------------
 
 Here is a sample of slub debug output:
+아래는 슬럽 디버그 출력 샘플이다.
 
 ====================================================================
 BUG kmalloc-8: Redzone overwritten
