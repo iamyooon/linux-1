@@ -52,6 +52,7 @@
 struct low_mem_threshold {
 	struct eventfd_ctx *eventfd;
 	unsigned long threshold;
+	void (*k_callback)(unsigned long threshold);
 };
 
 struct low_mem_threshold_ary {
@@ -127,6 +128,16 @@ static inline unsigned long _usable_pages(void)
 	return ((long)usable > 0) ? usable : 0;
 }
 
+void handle_lowmem_event(struct low_mem_threshold entry)
+{
+	if (entry.eventfd)
+		eventfd_signal(entry.eventfd, 1);
+	else if(entry.k_callback)
+		entry.k_callback(entry.threshold);
+	else
+		dprintk("eventfd and k_callback are NULL\n");
+}
+
 static void low_mem_notify_threshold(int force)
 {
 	struct low_mem_threshold_ary *t;
@@ -143,15 +154,15 @@ static void low_mem_notify_threshold(int force)
 	i = t->current_threshold;
 
 	if (force)
-		eventfd_signal(t->entries[i].eventfd, 1);
+		handle_lowmem_event(t->entries[i]);
 
 	for (; i >= 0 && unlikely(t->entries[i].threshold > free); i--)
-		eventfd_signal(t->entries[i].eventfd, 1);
+		handle_lowmem_event(t->entries[i]);
 
 	i++;
 
 	for (; i < t->size && unlikely(t->entries[i].threshold <= free); i++)
-		eventfd_signal(t->entries[i].eventfd, 1);
+		handle_lowmem_event(t->entries[i]);
 
 	t->current_threshold = i - 1;
 unlock:
@@ -172,8 +183,18 @@ static int compare_thresholds(const void *a, const void *b)
 	return 0;
 }
 
-static int low_mem_register_event(struct eventfd_ctx *eventfd,
-				unsigned long threshold)
+/**
+ * low_mem_register_event - register low memory event
+ * @eventfd: event file descriptor, kernel doesn't use eventfd(NULL) but kcallback
+ * @threshold: memory threshold value(unit.page count)
+ * @callback: function pointer for kernel handler, userspace doesn`t use
+ *            kcallback(NULL) but eventfd.
+ *
+ * Return 0, if registration success
+ * Return -ENOMEM, if kmalloc() fail
+ */
+int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
+						void (*callback)(unsigned long))
 {
 	struct low_mem_threshold_ary *new;
 	unsigned long free;
@@ -203,6 +224,7 @@ static int low_mem_register_event(struct eventfd_ctx *eventfd,
 
 	new->entries[size - 1].eventfd = eventfd;
 	new->entries[size - 1].threshold = threshold;
+	new->entries[size - 1].k_callback = callback;
 
 	sort(new->entries, size, sizeof(struct low_mem_threshold),
 			compare_thresholds, NULL);
@@ -468,7 +490,7 @@ static ssize_t event_ctrl_store(struct kobject *kobj,
 	else
 		threshold = (input < 0) ? total_pages : input;
 
-	ret = low_mem_register_event(eventfd, threshold);
+	ret = low_mem_register_event(eventfd, threshold, NULL);
 	if (ret)
 		goto fail;
 
