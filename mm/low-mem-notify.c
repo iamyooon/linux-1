@@ -289,7 +289,7 @@ static int check_duplicate_event(struct eventfd_ctx *eventfd)
 	mutex_lock(&thresholds_lock);
 	for (i=0; i < thresholds.primary->size; i++) {
 		if (thresholds.primary->entries[i].eventfd == eventfd) {
-			dprintk("eventfd(%d) is duplicated !!\n", eventfd);
+			dprintk("eventfd(%p) is duplicated !!\n", eventfd);
 			mutex_unlock(&thresholds_lock);
 			return 1;
 		}
