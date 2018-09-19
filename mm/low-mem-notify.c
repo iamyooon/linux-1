@@ -89,6 +89,43 @@ atomic_t freeze;
 static void low_mem_notify_threshold(int force);
 static unsigned long total_pages;
 
+int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
+						void (*callback)(unsigned long));
+
+void def_callback(unsigned long threshold)
+{
+	printk("%s current usable page is met to %ld\n", __func__, threshold);
+}
+
+static void reg_basic_callback(void)
+{
+	int total_pages = totalram_pages + total_swap_pages;
+	int min_unit = total_pages/20;
+
+	/* notification for 100% usable pages */
+	low_mem_register_event(NULL, min_unit*20, def_callback);
+	/* notification for 90% usable pages */
+	low_mem_register_event(NULL, min_unit*18, def_callback);
+	/* notification for 80% usable pages */
+	low_mem_register_event(NULL, min_unit*16, def_callback);
+	/* notification for 70% usable pages */
+	low_mem_register_event(NULL, min_unit*14, def_callback);
+	/* notification for 60% usable pages */
+	low_mem_register_event(NULL, min_unit*12, def_callback);
+	/* notification for 50% usable pages */
+	low_mem_register_event(NULL, min_unit*10, def_callback);
+	/* notification for 40% usable pages */
+	low_mem_register_event(NULL, min_unit*8, def_callback);
+	/* notification for 30% usable pages */
+	low_mem_register_event(NULL, min_unit*6, def_callback);
+	/* notification for 20% usable pages */
+	low_mem_register_event(NULL, min_unit*4, def_callback);
+	/* notification for 10% usable pages */
+	low_mem_register_event(NULL, min_unit*2, def_callback);
+	/* notification for 5% usable pages */
+	low_mem_register_event(NULL, min_unit*1, def_callback);
+}
+
 void low_mem_notify(void)
 {
 	if (atomic_read(&freeze))
@@ -720,6 +757,8 @@ static int __init low_mem_init(void)
 
 	memset(&thresholds, 0, sizeof(struct low_mem_thresholds));
 	mutex_init(&thresholds_lock);
+
+	reg_basic_callback();
 
 	return err;
 }
