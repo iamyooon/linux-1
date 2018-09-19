@@ -134,34 +134,89 @@ void low_mem_notify(void)
 	low_mem_notify_threshold(0);
 }
 
+static unsigned long get_reserved_pages(void)
+{
+	return totalreserve_pages;
+}
+
+static unsigned long get_free_pages(void)
+{
+	return global_page_state(NR_FREE_PAGES);
+}
+
+static unsigned long get_shmem_pages(void)
+{
+	return global_page_state(NR_SHMEM);
+}
+
+static unsigned long get_file_pages(void)
+{
+	return global_page_state(NR_FILE_PAGES);
+}
+
+static unsigned long get_slab_reclaimable_pages(void)
+{
+	return global_page_state(NR_SLAB_RECLAIMABLE);
+}
+
+static unsigned long get_swap_pages(void)
+{
+#ifdef CONFIG_SWAP
+	return atomic_long_read(&nr_swap_pages);
+#else
+	return 0;
+#endif
+}
+
+static unsigned long get_swapcache_pages(void)
+{
+#ifdef CONFIG_SWAP
+	return total_swapcache_pages();
+#else
+	return 0;
+#endif
+}
+
+static unsigned long get_zramswap_pages(void)
+{
+#ifdef CONFIG_SWAP
+	if (atomic_read(&zramswap))
+		return (get_swap_pages()/3);
+	else
+		return 0;
+#else
+	return 0;
+#endif
+}
+
 static inline unsigned long _free_pages(void)
 {
-	unsigned long free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
-	unsigned long file = global_page_state(NR_FILE_PAGES) -
-						global_page_state(NR_SHMEM);
-#ifdef CONFIG_SWAP
-	free += atomic_long_read(&nr_swap_pages);
-	file -= total_swapcache_pages();
-#endif
+	unsigned long free = get_free_pages();
+	unsigned long reserved = get_reserved_pages();
+	unsigned long file = get_file_pages();
+	unsigned long shmem = get_shmem_pages();
+	unsigned long swap = get_swap_pages();
+	unsigned long swapcache = get_swapcache_pages();
+
+	free += swap - reserved;
+	file -= swapcache - shmem;
+
 	return (free > file) ? free : file;
 }
 
 static inline unsigned long _usable_pages(void)
 {
-	unsigned long free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
-	unsigned long file = global_page_state(NR_FILE_PAGES)
-						- global_page_state(NR_SHMEM);
+	unsigned long free = get_free_pages();
+	unsigned long reserved = get_reserved_pages();
+	unsigned long file = get_file_pages();
+	unsigned long shmem = get_shmem_pages();
+	unsigned long swap = get_swap_pages();
+	unsigned long swapcache = get_swapcache_pages();
+	unsigned long slab_reclaimable = get_slab_reclaimable_pages();
+	unsigned long zramuse = get_zramswap_pages();
 	unsigned long usable;
-#ifdef CONFIG_SWAP
-	unsigned long swap = atomic_long_read(&nr_swap_pages);
-	free += swap;
-	free -= total_swapcache_pages();
-	if (atomic_read(&zramswap))
-		free -= (swap / 3);
-#endif
-	free += global_page_state(NR_SLAB_RECLAIMABLE);
 
-	usable = free + file;
+	usable = free + file + swap + slab_reclaimable - swapcache - zramuse - reserved - shmem;
 	return ((long)usable > 0) ? usable : 0;
 }
 
@@ -662,34 +717,28 @@ LOW_MEM_ATTR(freeze);
 static ssize_t usable_stat_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
-	unsigned long free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
-	unsigned long file = global_page_state(NR_FILE_PAGES)
-						- global_page_state(NR_SHMEM);
+	unsigned long free = get_free_pages();
+	unsigned long reserved = get_reserved_pages();
+	unsigned long file = get_file_pages();
+	unsigned long shmem = get_shmem_pages();
 	unsigned long slab_reclaimable = global_page_state(NR_SLAB_RECLAIMABLE);
+	unsigned long swap = get_swap_pages();
+	unsigned long swapcache = get_swapcache_pages();
+	unsigned long zramuse = get_zramswap_pages();
 	unsigned long usable;
 	ssize_t count = 0;
-#ifdef CONFIG_SWAP
-	unsigned long swap = atomic_long_read(&nr_swap_pages);
-	unsigned long swapcache = total_swapcache_pages();
-	unsigned long zramuse = 0;
 
-	if (atomic_read(&zramswap))
-		zramuse = (swap / 3);
-#else
-	unsigned long swap = 0;
-	unsigned long swapcache = 0;
-	unsigned long zramuse = 0;
-#endif
-
-	usable = free + swap - zramuse + file - swapcache + slab_reclaimable;
+	usable = free + file + swap + slab_reclaimable - swapcache - zramuse - reserved - shmem;
 
 	count  = sprintf(&buf[count], "usable pages :         %8lu\n", usable);
 	count += sprintf(&buf[count], "(+) free :             %8lu\n", free);
-	count += sprintf(&buf[count], "(+) swap :             %8lu\n", swap);
-	count += sprintf(&buf[count], "(-) zramuse :          %8lu\n", zramuse);
 	count += sprintf(&buf[count], "(+) file :             %8lu\n", file);
-	count += sprintf(&buf[count], "(-) swapcache :        %8lu\n", swapcache);
+	count += sprintf(&buf[count], "(+) swap :             %8lu\n", swap);
 	count += sprintf(&buf[count], "(+) slab_reclaimable : %8lu\n", slab_reclaimable);
+	count += sprintf(&buf[count], "(-) swapcache :        %8lu\n", swapcache);
+	count += sprintf(&buf[count], "(-) zramuse :          %8lu\n", zramuse);
+	count += sprintf(&buf[count], "(-) totalreserved :    %8lu\n", reserved);
+	count += sprintf(&buf[count], "(-) shmem:             %8lu\n", shmem);
 	count += sprintf(&buf[count], "thresholds : ");
 	count += thresholds_show(kobj, attr, &buf[count]);
 	count += sprintf(&buf[count], "\n");
@@ -701,26 +750,19 @@ LOW_MEM_ATTR_RO(usable_stat);
 static ssize_t usable_raw_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
-	unsigned long free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
-	unsigned long file = global_page_state(NR_FILE_PAGES)
-						- global_page_state(NR_SHMEM);
-	unsigned long slab_reclaimable = global_page_state(NR_SLAB_RECLAIMABLE);
+	unsigned long free = get_free_pages();
+	unsigned long reserved = get_reserved_pages();
+	unsigned long file = get_file_pages();
+	unsigned long shmem = get_shmem_pages();
+	unsigned long slab_reclaimable = get_slab_reclaimable_pages();
+	unsigned long swap = get_swap_pages();
+	unsigned long swapcache = get_swapcache_pages();
+	unsigned long zramuse = get_zramswap_pages();
 	unsigned long usable;
-#ifdef CONFIG_SWAP
-	unsigned long swap = atomic_long_read(&nr_swap_pages);
-	unsigned long swapcache = total_swapcache_pages();
-	unsigned long zramuse = 0;
-	if (atomic_read(&zramswap))
-		zramuse = (swap / 3);
-#else
-	unsigned long swap = 0;
-	unsigned long swapcache = 0;
-	unsigned long zramuse = 0;
-#endif
 
-	usable = free + swap - zramuse + file - swapcache + slab_reclaimable;
-	return sprintf(buf, "%ld %ld %ld %ld %ld %ld %ld\n",
-			usable, free, swap, zramuse, file, swapcache, slab_reclaimable);
+	usable = free + file + swap + slab_reclaimable - swapcache - zramuse - reserved - shmem;
+	return sprintf(buf, "%ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
+			usable, free, file, swap, slab_reclaimable, swapcache, zramuse, reserved, shmem);
 }
 LOW_MEM_ATTR_RO(usable_raw);
 
