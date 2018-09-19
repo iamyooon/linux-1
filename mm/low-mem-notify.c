@@ -92,7 +92,7 @@ static unsigned long total_pages;
 int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
 						void (*callback)(unsigned long));
 
-void def_callback(unsigned long threshold)
+static void def_callback(unsigned long threshold)
 {
 	printk("%s current usable page is met to %ld\n", __func__, threshold);
 }
@@ -220,7 +220,7 @@ static inline unsigned long _usable_pages(void)
 	return ((long)usable > 0) ? usable : 0;
 }
 
-void handle_lowmem_event(struct low_mem_threshold entry)
+static void handle_lowmem_event(struct low_mem_threshold entry)
 {
 	if (entry.eventfd)
 		eventfd_signal(entry.eventfd, 1);
