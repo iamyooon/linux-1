@@ -99,6 +99,12 @@ atomic_t freeze;
  */
 static int threshold_walking = 1;
 
+/*
+ * jittering prevention feature
+ * if this feature is enabled, jittering between buddy threshold is prevented.
+ */
+static int prevent_jittering = 0;
+
 static void low_mem_notify_threshold(int force);
 static unsigned long total_pages;
 
@@ -138,6 +144,31 @@ static void reg_basic_callback(void)
 	/* notification for 5% usable pages */
 	low_mem_register_event(NULL, min_unit*1, def_callback);
 }
+
+static int need_to_skip(struct low_mem_threshold_ary *array, int next)
+{
+	int prev = array->prev_threshold;
+	int curr = array->current_threshold;
+
+	unsigned long last_jiffies = array->entries[curr].last_jiffies;
+	unsigned long timeout = msecs_to_jiffies(60*1000);
+
+	if (!prevent_jittering)
+		return 0;
+
+	if (prev != next)
+		return 0;
+
+	if (curr-1 != next && curr+1 != next)
+		return 0;
+
+	if (time_after_eq(jiffies, last_jiffies + timeout)){
+		return 0;
+	}
+
+	return 1;
+}
+
 
 void low_mem_notify(void)
 {
@@ -264,8 +295,10 @@ static void low_mem_notify_threshold(int force)
 	threshold = t->entries[i].threshold;
 	free = _usable_pages(); /* _free_pages(); */
 
-	if (force)
+	if (force) {
 		handle_lowmem_event(t->entries[i]);
+		t->entries[i].last_jiffies = jiffies;
+	}
 
 	/*
 	 * fastpath - still in current threshold
@@ -281,20 +314,27 @@ static void low_mem_notify_threshold(int force)
 	 * slowpath - need to search proper threshold
 	 */
 	for (; i >= 0 && unlikely(t->entries[i].threshold > free); i--)
-		if (threshold_walking)
+		if (threshold_walking && !need_to_skip(t, i)) {
 			handle_lowmem_event(t->entries[i]);
+			t->entries[i].last_jiffies = jiffies;
+		}
 
 	i++;
 
 	for (; i < t->size && unlikely(t->entries[i].threshold <= free); i++)
-		if (threshold_walking)
+		if (threshold_walking && !need_to_skip(t, i)) {
 			handle_lowmem_event(t->entries[i]);
+			t->entries[i].last_jiffies = jiffies;
+		}
+
+	if (!threshold_walking && !need_to_skip(t, i - 1)) {
+		handle_lowmem_event(t->entries[i - 1]);
+		t->entries[i - 1].last_jiffies = jiffies;
+	}
 
 	t->prev_threshold = t->current_threshold;
 	t->current_threshold = i - 1;
 
-	if (!threshold_walking)
-		handle_lowmem_event(t->entries[i - 1]);
 unlock:
 	rcu_read_unlock();
 }
@@ -784,6 +824,9 @@ static ssize_t threshold_walking_store(struct kobject *kobj,
 	return count;
 }
 LOW_MEM_ATTR(threshold_walking);
+
+
+
 static ssize_t usable_stat_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
