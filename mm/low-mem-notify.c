@@ -233,7 +233,9 @@ static void handle_lowmem_event(struct low_mem_threshold entry)
 static void low_mem_notify_threshold(int force)
 {
 	struct low_mem_threshold_ary *t;
+	unsigned long threshold;
 	unsigned long free;
+	int max_idx;
 	int i;
 
 	rcu_read_lock();
@@ -245,12 +247,26 @@ static void low_mem_notify_threshold(int force)
 	if (i < 0)
 		goto unlock;
 
+	max_idx = t->size - 1;
+	threshold = t->entries[i].threshold;
 	free = _usable_pages(); /* _free_pages(); */
-
 
 	if (force)
 		handle_lowmem_event(t->entries[i]);
 
+	/*
+	 * fastpath - still in current threshold
+	 */
+	if (threshold <= free) {
+		if (i < max_idx && free < t->entries[i+1].threshold)
+			goto unlock;
+		if (i == max_idx)
+			goto unlock;
+	}
+
+	/*
+	 * slowpath - need to search proper threshold
+	 */
 	for (; i >= 0 && unlikely(t->entries[i].threshold > free); i--)
 		handle_lowmem_event(t->entries[i]);
 
