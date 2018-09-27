@@ -88,6 +88,17 @@ atomic_t zramswap;
 /* freeze flag */
 atomic_t freeze;
 
+/*
+ * threshold walking feature
+ * In the current implementation, if the current threshold is changed
+ * more than one level, it will process two or more thresholds in turn.
+ *
+ * However, in some cases the process of change is not important and
+ * only the end result is important. We added a threshold walking feature
+ * to handle this case. default is true.
+ */
+static int threshold_walking = 1;
+
 static void low_mem_notify_threshold(int force);
 static unsigned long total_pages;
 
@@ -270,15 +281,20 @@ static void low_mem_notify_threshold(int force)
 	 * slowpath - need to search proper threshold
 	 */
 	for (; i >= 0 && unlikely(t->entries[i].threshold > free); i--)
-		handle_lowmem_event(t->entries[i]);
+		if (threshold_walking)
+			handle_lowmem_event(t->entries[i]);
 
 	i++;
 
 	for (; i < t->size && unlikely(t->entries[i].threshold <= free); i++)
-		handle_lowmem_event(t->entries[i]);
+		if (threshold_walking)
+			handle_lowmem_event(t->entries[i]);
 
 	t->prev_threshold = t->current_threshold;
 	t->current_threshold = i - 1;
+
+	if (!threshold_walking)
+		handle_lowmem_event(t->entries[i - 1]);
 unlock:
 	rcu_read_unlock();
 }
@@ -740,6 +756,34 @@ static ssize_t freeze_store(struct kobject *kobj,
 }
 LOW_MEM_ATTR(freeze);
 
+static ssize_t threshold_walking_show(struct kobject *kobj,
+				struct kobj_attribute *attr, char *buf)
+{
+	size_t count;
+	count = sprintf(buf, "%d\n", threshold_walking);
+	return count;
+}
+
+static ssize_t threshold_walking_store(struct kobject *kobj,
+				struct kobj_attribute *attr,
+				const char *buf, size_t count)
+{
+	unsigned long t;
+	char *tmp;
+	int ret;
+
+	tmp = strstrip((char*)buf);
+	if (strlen(tmp) == 0)
+		return 0;
+
+	ret = kstrtoul(tmp, 10, &t);
+	if (ret)
+		return -EINVAL;
+
+	threshold_walking = t > 0 ? 1 : 0 ;
+	return count;
+}
+LOW_MEM_ATTR(threshold_walking);
 static ssize_t usable_stat_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
@@ -805,6 +849,7 @@ static struct attribute *low_mem_attrs[] = {
 	&low_mem_freeze_attr.attr,
 	&low_mem_usable_stat_attr.attr,
 	&low_mem_usable_raw_attr.attr,
+	&low_mem_threshold_walking_attr.attr,
 	NULL,
 };
 
