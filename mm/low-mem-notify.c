@@ -274,6 +274,12 @@ static void handle_lowmem_event(struct low_mem_threshold entry)
 		dprintk("eventfd and k_callback are NULL\n");
 }
 
+static void handle_and_update(struct low_mem_threshold_ary *t, int i)
+{
+	handle_lowmem_event(t->entries[i]);
+	t->entries[i].last_jiffies = jiffies;
+}
+
 static void low_mem_notify_threshold(int force)
 {
 	struct low_mem_threshold_ary *t;
@@ -295,10 +301,8 @@ static void low_mem_notify_threshold(int force)
 	threshold = t->entries[i].threshold;
 	free = _usable_pages(); /* _free_pages(); */
 
-	if (force) {
-		handle_lowmem_event(t->entries[i]);
-		t->entries[i].last_jiffies = jiffies;
-	}
+	if (force)
+		handle_and_update(t, i);
 
 	/*
 	 * fastpath - still in current threshold
@@ -314,23 +318,17 @@ static void low_mem_notify_threshold(int force)
 	 * slowpath - need to search proper threshold
 	 */
 	for (; i >= 0 && unlikely(t->entries[i].threshold > free); i--)
-		if (threshold_walking && !need_to_skip(t, i)) {
-			handle_lowmem_event(t->entries[i]);
-			t->entries[i].last_jiffies = jiffies;
-		}
+		if (threshold_walking && !need_to_skip(t, i))
+			handle_and_update(t, i);
 
 	i++;
 
 	for (; i < t->size && unlikely(t->entries[i].threshold <= free); i++)
-		if (threshold_walking && !need_to_skip(t, i)) {
-			handle_lowmem_event(t->entries[i]);
-			t->entries[i].last_jiffies = jiffies;
-		}
+		if (threshold_walking && !need_to_skip(t, i))
+			handle_and_update(t, i);
 
-	if (!threshold_walking && !need_to_skip(t, i - 1)) {
-		handle_lowmem_event(t->entries[i - 1]);
-		t->entries[i - 1].last_jiffies = jiffies;
-	}
+	if (!threshold_walking && !need_to_skip(t, i - 1))
+		handle_and_update(t, i - 1);
 
 	t->prev_threshold = t->current_threshold;
 	t->current_threshold = i - 1;
