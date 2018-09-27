@@ -53,6 +53,7 @@ struct low_mem_threshold {
 	struct eventfd_ctx *eventfd;
 	unsigned long threshold;
 	void (*k_callback)(unsigned long threshold);
+	unsigned long last_jiffies;
 };
 
 struct low_mem_threshold_ary {
