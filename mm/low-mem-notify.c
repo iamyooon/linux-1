@@ -56,6 +56,7 @@ struct low_mem_threshold {
 };
 
 struct low_mem_threshold_ary {
+	int prev_threshold;
 	int current_threshold;
 	unsigned int size;
 	struct low_mem_threshold entries[0];
@@ -275,6 +276,7 @@ static void low_mem_notify_threshold(int force)
 	for (; i < t->size && unlikely(t->entries[i].threshold <= free); i++)
 		handle_lowmem_event(t->entries[i]);
 
+	t->prev_threshold = t->current_threshold;
 	t->current_threshold = i - 1;
 unlock:
 	rcu_read_unlock();
@@ -344,7 +346,9 @@ int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
 		dprintk("[%d] threshold : %ld\n", i, new->entries[i].threshold);
 	#endif
 
+	new->prev_threshold = new->current_threshold;
 	new->current_threshold = -1;
+
 	for (i = 0; i < size; i++) {
 		if (new->entries[i].threshold < free)
 			++new->current_threshold;
@@ -389,7 +393,9 @@ static void low_mem_unregister_event(struct eventfd_ctx *eventfd)
 	}
 	new->size = size;
 
+	new->prev_threshold = new->current_threshold;
 	new->current_threshold = -1;
+
 	for (i = 0, j = 0; i < thresholds.primary->size; i++) {
 		if (thresholds.primary->entries[i].eventfd == eventfd)
 			continue;
