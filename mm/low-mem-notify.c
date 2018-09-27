@@ -241,9 +241,12 @@ static void low_mem_notify_threshold(int force)
 	if (!t)
 		goto unlock;
 
+	i = t->current_threshold;
+	if (i < 0)
+		goto unlock;
+
 	free = _usable_pages(); /* _free_pages(); */
 
-	i = t->current_threshold;
 
 	if (force)
 		handle_lowmem_event(t->entries[i]);
