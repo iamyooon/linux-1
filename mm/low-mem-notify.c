@@ -823,7 +823,34 @@ static ssize_t threshold_walking_store(struct kobject *kobj,
 }
 LOW_MEM_ATTR(threshold_walking);
 
+static ssize_t prevent_jittering_show(struct kobject *kobj,
+				struct kobj_attribute *attr, char *buf)
+{
+	size_t count;
+	count = sprintf(buf, "%d\n", prevent_jittering);
+	return count;
+}
 
+static ssize_t prevent_jittering_store(struct kobject *kobj,
+				struct kobj_attribute *attr,
+				const char *buf, size_t count)
+{
+	unsigned long t;
+	char *tmp;
+	int ret;
+
+	tmp = strstrip((char*)buf);
+	if (strlen(tmp) == 0)
+		return 0;
+
+	ret = kstrtoul(tmp, 10, &t);
+	if (ret)
+		return -EINVAL;
+
+	prevent_jittering = t > 0 ? 1 : 0 ;
+	return count;
+}
+LOW_MEM_ATTR(prevent_jittering);
 
 static ssize_t usable_stat_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
@@ -891,6 +918,7 @@ static struct attribute *low_mem_attrs[] = {
 	&low_mem_usable_stat_attr.attr,
 	&low_mem_usable_raw_attr.attr,
 	&low_mem_threshold_walking_attr.attr,
+	&low_mem_prevent_jittering_attr.attr,
 	NULL,
 };
 
