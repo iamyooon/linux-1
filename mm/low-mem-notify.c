@@ -869,7 +869,7 @@ static ssize_t usable_stat_show(struct kobject *kobj,
 	unsigned long reserved = get_reserved_pages();
 	unsigned long file = get_file_pages();
 	unsigned long shmem = get_shmem_pages();
-	unsigned long slab_reclaimable = global_page_state(NR_SLAB_RECLAIMABLE);
+	unsigned long slab_reclaimable = get_slab_reclaimable_pages();
 	unsigned long swap = get_swap_pages();
 	unsigned long swapcache = get_swapcache_pages();
 	unsigned long zramuse = get_zramswap_pages();
