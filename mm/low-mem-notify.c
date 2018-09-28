@@ -115,9 +115,28 @@ static unsigned long total_pages;
 int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
 						void (*callback)(unsigned long));
 
+static void show_summary_meminfo(unsigned long threshold);
+static void show_process_rss_info(void);
+static void show_freemem_info(void);
+
 static void def_callback(unsigned long threshold)
 {
-	printk("%s current usable page is met to %ld\n", __func__, threshold);
+	printk("[lmn] current threshold changed to %ldK\n", K(threshold));
+}
+
+static void show_meminfo(unsigned long threshold)
+{
+       def_callback(threshold);
+       show_summary_meminfo(threshold);
+       show_freemem_info();
+}
+
+static void show_all_meminfo(unsigned long threshold)
+{
+       def_callback(threshold);
+       show_summary_meminfo(threshold);
+       show_freemem_info();
+       show_process_rss_info();
 }
 
 static void reg_basic_callback(void)
@@ -138,15 +157,15 @@ static void reg_basic_callback(void)
 	/* notification for 50% usable pages */
 	low_mem_register_event(NULL, min_unit*10, def_callback);
 	/* notification for 40% usable pages */
-	low_mem_register_event(NULL, min_unit*8, def_callback);
+	low_mem_register_event(NULL, min_unit*8, show_meminfo);
 	/* notification for 30% usable pages */
-	low_mem_register_event(NULL, min_unit*6, def_callback);
+	low_mem_register_event(NULL, min_unit*6, show_meminfo);
 	/* notification for 20% usable pages */
-	low_mem_register_event(NULL, min_unit*4, def_callback);
+	low_mem_register_event(NULL, min_unit*4, show_all_meminfo);
 	/* notification for 10% usable pages */
-	low_mem_register_event(NULL, min_unit*2, def_callback);
+	low_mem_register_event(NULL, min_unit*2, show_all_meminfo);
 	/* notification for 5% usable pages */
-	low_mem_register_event(NULL, min_unit*1, def_callback);
+	low_mem_register_event(NULL, min_unit*1, show_all_meminfo);
 }
 
 static int need_to_skip(struct low_mem_threshold_ary *array, int next)
