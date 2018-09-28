@@ -33,6 +33,8 @@
 #include <linux/mutex.h>
 #include <linux/file.h>
 #include <linux/list.h>
+#include <linux/oom.h>		// find_lock_task_mm()
+#include <linux/blkdev.h>	// nr_blockdev_pages()
 
 #include <linux/low-mem-notify.h>
 #ifdef CONFIG_SWAP
@@ -46,6 +48,8 @@
 #else
 #define dprintk(msg, args...)
 #endif
+
+#define K(x) ((x) << (PAGE_SHIFT - 10))
 
 #define DEFAULT_RATIO			1
 
@@ -236,6 +240,139 @@ static unsigned long get_zramswap_pages(void)
 #else
 	return 0;
 #endif
+}
+
+static void show_migration_types(unsigned char type)
+{
+        static const char types[MIGRATE_TYPES] = {
+                [MIGRATE_UNMOVABLE]     = 'U',
+                [MIGRATE_RECLAIMABLE]   = 'E',
+                [MIGRATE_MOVABLE]       = 'M',
+                [MIGRATE_RESERVE]       = 'R',
+#ifdef CONFIG_CMA
+                [MIGRATE_CMA]           = 'C',
+#endif
+#ifdef CONFIG_MEMORY_ISOLATION
+                [MIGRATE_ISOLATE]       = 'I',
+#endif
+        };
+        char tmp[MIGRATE_TYPES + 1];
+        char *p = tmp;
+        int i;
+
+        for (i = 0; i < MIGRATE_TYPES; i++) {
+                if (type & (1 << i))
+                        *p++ = types[i];
+        }
+
+        *p = '\0';
+        printk("(%s) ", tmp);
+}
+
+static void show_freemem_info(void)
+{
+	struct zone *zone;
+
+        for_each_populated_zone(zone) {
+                unsigned int order;
+                unsigned long nr[MAX_ORDER], flags, total = 0;
+                unsigned char types[MAX_ORDER];
+
+                printk("%s: ", zone->name);
+
+                spin_lock_irqsave(&zone->lock, flags);
+                for (order = 0; order < MAX_ORDER; order++) {
+                        struct free_area *area = &zone->free_area[order];
+                        int type;
+
+                        nr[order] = area->nr_free;
+                        total += nr[order] << order;
+
+                        types[order] = 0;
+                        for (type = 0; type < MIGRATE_TYPES; type++) {
+                                if (!list_empty(&area->free_list[type]))
+                                        types[order] |= 1 << type;
+                        }
+                }
+                spin_unlock_irqrestore(&zone->lock, flags);
+                for (order = 0; order < MAX_ORDER; order++) {
+                        printk("%lu*%lukB ", nr[order], K(1UL) << order);
+                        if (nr[order])
+                                show_migration_types(types[order]);
+                }
+                printk("= %lukB\n", K(total));
+        }
+}
+
+static void show_process_rss_info(void)
+{
+	struct task_struct *p;
+	struct task_struct *task;
+
+	printk("[lmn] process's rss info\n");
+	printk("[lmn] %27s %7s\n", "name(pid)", "rss");
+
+	rcu_read_lock();
+	for_each_process(p) {
+		if (p->flags & PF_KTHREAD)
+			continue;
+
+		task = find_lock_task_mm(p);
+		if (!task) {
+			continue;
+		}
+		printk("[lmn] %20s(%5d) %7ldKB\n",
+			task->comm, task->pid, K(get_mm_rss(task->mm)));
+		task_unlock(task);
+	}
+	rcu_read_unlock();
+}
+
+static void show_summary_meminfo(unsigned long threshold)
+{
+	unsigned long total     = totalram_pages;
+	unsigned long free      = get_free_pages();
+	unsigned long buffer    = nr_blockdev_pages();
+	unsigned long file      = get_file_pages();
+	unsigned long slab      = get_slab_reclaimable_pages() +
+				  get_slab_unreclaimable_pages();
+	unsigned long swapcache = get_swapcache_pages();
+	unsigned long cached    = file - swapcache - buffer;
+	unsigned long available = 0;
+	unsigned long wmark_low = 0;
+	unsigned long pagecache = 0;
+	unsigned long anon      = 0;
+	unsigned long count     = 0;
+
+	unsigned long pages[NR_LRU_LISTS] = {0,};
+	struct zone *zone;
+	char buf[256] = {0,};
+	int lru = 0;
+
+	if (cached < 0)
+		cached = 0;
+
+	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
+		pages[lru] = global_page_state(NR_LRU_BASE + lru);
+
+	for_each_zone(zone)
+		wmark_low += zone->watermark[WMARK_LOW];
+
+	pagecache = pages[LRU_ACTIVE_FILE] + pages[LRU_INACTIVE_FILE];
+	pagecache -= min(pagecache / 2, wmark_low);
+
+	available = free - wmark_low + pagecache + global_page_state(NR_SLAB_RECLAIMABLE)
+		- min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
+	if (available < 0)
+		available = 0;
+
+	anon = pages[LRU_ACTIVE_ANON] + pages[LRU_INACTIVE_ANON];
+
+	count  = sprintf(buf, "[lmn]   Total     Free    Avail   Cached     Anon     File     Slab\n");
+	count += sprintf(&buf[count], "%s %6luK %7luK %7luK %7luK %7luK %7luK %7luK\n",
+			"[lmn]", K(total), K(free), K(available), K(cached), K(anon), K(file), K(slab));
+	printk("%s", buf);
+	return;
 }
 
 static inline unsigned long _free_pages(void)
