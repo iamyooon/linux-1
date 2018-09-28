@@ -401,7 +401,12 @@ int low_mem_register_event(struct eventfd_ctx *eventfd, unsigned long threshold,
 		dprintk("[%d] threshold : %ld\n", i, new->entries[i].threshold);
 	#endif
 
-	new->prev_threshold = new->current_threshold;
+	/*
+	 * It should be cleared because the threshold corresponding
+	 * to the index pointed to by the previous threshold may not
+	 * be valid at this time.
+	 */
+	new->prev_threshold = -1;
 	new->current_threshold = -1;
 
 	for (i = 0; i < size; i++) {
@@ -448,7 +453,12 @@ static void low_mem_unregister_event(struct eventfd_ctx *eventfd)
 	}
 	new->size = size;
 
-	new->prev_threshold = new->current_threshold;
+	/*
+	 * It should be cleared because the threshold corresponding
+	 * to the index pointed to by the previous threshold may not
+	 * be valid at this time.
+	 */
+	new->prev_threshold = -1;
 	new->current_threshold = -1;
 
 	for (i = 0, j = 0; i < thresholds.primary->size; i++) {
