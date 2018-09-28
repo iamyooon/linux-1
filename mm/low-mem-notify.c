@@ -203,6 +203,11 @@ static unsigned long get_slab_reclaimable_pages(void)
 	return global_page_state(NR_SLAB_RECLAIMABLE);
 }
 
+static unsigned long get_slab_unreclaimable_pages(void)
+{
+	return global_page_state(NR_SLAB_UNRECLAIMABLE);
+}
+
 static unsigned long get_swap_pages(void)
 {
 #ifdef CONFIG_SWAP
