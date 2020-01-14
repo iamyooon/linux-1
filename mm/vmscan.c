@@ -3063,6 +3063,9 @@ static void snapshot_refaults(struct mem_cgroup *root_memcg, pg_data_t *pgdat)
  * returns:	0, if no pages reclaimed
  * 		else, the number of pages reclaimed
  */
+ /* direct-reclaim을 요청하고 free 페이지 확보를 시도 함
+  * comment by grlee
+  */
 static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 					  struct scan_control *sc)
 {
@@ -3071,20 +3074,28 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	struct zoneref *z;
 	struct zone *zone;
 retry:
+	// ?
 	delayacct_freepages_start();
 
+	// global_reclaim을 수행하는 경우 ALLOCSTALL stat를 증가시킴
 	if (global_reclaim(sc))
 		__count_zid_vm_events(ALLOCSTALL, sc->reclaim_idx, 1);
 
+	// priority가 가장 높아질 때가지 수행
 	do {
+		// vmpressure 정보를 갱신
 		vmpressure_prio(sc->gfp_mask, sc->target_mem_cgroup,
 				sc->priority);
+		// scan 수를 리셋시킴
 		sc->nr_scanned = 0;
+		// 페이지를 회수 함
 		shrink_zones(zonelist, sc);
 
+		// 회수한 페이지 수가 회수해야 할 페이지 보다 큰경우 loop 빠져나감
 		if (sc->nr_reclaimed >= sc->nr_to_reclaim)
 			break;
 
+		// compaction이 준비된 경우 loop 빠져나감
 		if (sc->compaction_ready)
 			break;
 
@@ -3092,11 +3103,13 @@ retry:
 		 * If we're getting trouble reclaiming, start doing
 		 * writepage even in laptop mode.
 		 */
+		// 우선 순위를 2단계 더 높여 처리하는 경우 writepage 기능 설정
 		if (sc->priority < DEF_PRIORITY - 2)
 			sc->may_writepage = 1;
 	} while (--sc->priority >= 0);
 
 	last_pgdat = NULL;
+	// ?
 	for_each_zone_zonelist_nodemask(zone, z, zonelist, sc->reclaim_idx,
 					sc->nodemask) {
 		if (zone->zone_pgdat == last_pgdat)
@@ -3106,16 +3119,20 @@ retry:
 		set_memcg_congestion(last_pgdat, sc->target_mem_cgroup, false);
 	}
 
+	// ?
 	delayacct_freepages_end();
 
+	// 페이지 회수하였으면 그 개수를 리턴
 	if (sc->nr_reclaimed)
 		return sc->nr_reclaimed;
 
 	/* Aborted reclaim to try compaction? don't OOM, then */
+	// compaction이 준비되었으면 1 리턴
 	if (sc->compaction_ready)
 		return 1;
 
 	/* Untapped cgroup reserves?  Don't OOM, retry. */
+	// sc->memcg_low_skipped이면 요청받은 priority 로 retry로 이동
 	if (sc->memcg_low_skipped) {
 		sc->priority = initial_priority;
 		sc->memcg_low_reclaim = 1;
@@ -3258,10 +3275,15 @@ out:
 	return false;
 }
 
+/* reclaim을 시도하고 회수 된 페이지 수를 반환함
+ *
+ * comment by grlee
+ */
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 				gfp_t gfp_mask, nodemask_t *nodemask)
 {
 	unsigned long nr_reclaimed;
+	// reclaim을 위한구조체 준비
 	struct scan_control sc = {
 		.nr_to_reclaim = SWAP_CLUSTER_MAX,
 		.gfp_mask = current_gfp_context(gfp_mask),
@@ -3287,12 +3309,14 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	 * 1 is returned so that the page allocator does not OOM kill at this
 	 * point.
 	 */
+	// ?
 	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask))
 		return 1;
 
 	set_task_reclaim_state(current, &sc.reclaim_state);
 	trace_mm_vmscan_direct_reclaim_begin(order, sc.gfp_mask);
 
+	// 페이지 회수를 시도함
 	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
 
 	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed);

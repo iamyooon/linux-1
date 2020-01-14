@@ -2068,13 +2068,20 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 	return false;
 }
 
+/*
+ * compaction 수행하고 결과를 리턴함
+ * compaction을 계속 수행해야하는지도 확인
+ * comment by grlee
+ */
 static enum compact_result
 compact_zone(struct compact_control *cc, struct capture_control *capc)
 {
 	enum compact_result ret;
+	// compaction은 존의 시작 pfn부터 끝 pfn까지를 대상으로 함
 	unsigned long start_pfn = cc->zone->zone_start_pfn;
 	unsigned long end_pfn = zone_end_pfn(cc->zone);
 	unsigned long last_migrated_pfn;
+	// MIGRATE_ASYNC 확인
 	const bool sync = cc->mode != MIGRATE_ASYNC;
 	bool update_cached;
 
@@ -2082,6 +2089,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * These counters track activities during zone compaction.  Initialize
 	 * them before compacting a new zone.
 	 */
+	// compaction에사용되는 카운터를 초기화
 	cc->total_migrate_scanned = 0;
 	cc->total_free_scanned = 0;
 	cc->nr_migratepages = 0;
@@ -2089,9 +2097,14 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	INIT_LIST_HEAD(&cc->freepages);
 	INIT_LIST_HEAD(&cc->migratepages);
 
+	// gfp 플래그를 사용하여 migrate 타입을 구함
 	cc->migratetype = gfpflags_to_migratetype(cc->gfp_mask);
+	// depth 더 들러가야하나?
+	// compaction을 계속 수행해도 되는지 확인
+	// compaction 수행
 	ret = compaction_suitable(cc->zone, cc->order, cc->alloc_flags,
 							cc->classzone_idx);
+	// compaction에 성공하였거나 skip된 경우 compaction하지 않고 return ret
 	/* Compaction is likely to fail */
 	if (ret == COMPACT_SUCCESS || ret == COMPACT_SKIPPED)
 		return ret;
@@ -2103,7 +2116,9 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * Clear pageblock skip if there were failures recently and compaction
 	 * is about to be retried after being deferred.
 	 */
+	// compaction을 재시작해야하는지 확인
 	if (compaction_restarting(cc->zone, cc->order))
+		// 재시작하기위한 처리?
 		__reset_isolation_suitable(cc->zone);
 
 	/*
@@ -2112,27 +2127,40 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * want to compact the whole zone), but check that it is initialised
 	 * by ensuring the values are within zone boundaries.
 	 */
+	// ?
 	cc->fast_start_pfn = 0;
+	// 처음 compaction 시작이면 migrate_pfn 은 start_pfn(존의 시작), free_pfn은 end_pfn - 1(존의) 으로 함
 	if (cc->whole_zone) {
 		cc->migrate_pfn = start_pfn;
 		cc->free_pfn = pageblock_start_pfn(end_pfn - 1);
 	} else {
+		// 연이어 동작하는 경우 migrate_pfn과 free_pfn을 마지막 처리한 pfn위치로 함
 		cc->migrate_pfn = cc->zone->compact_cached_migrate_pfn[sync];
 		cc->free_pfn = cc->zone->compact_cached_free_pfn;
+		// free_pfn이 start_pfn보다 작거나 end_pfn보다 크거나 같으면
+		// -> free_pfn이 존의 범위를 벗어나면
+		// free_pfn을 end_pfn - 1 존의 시작 페이지 블럭으로 위치시킴
 		if (cc->free_pfn < start_pfn || cc->free_pfn >= end_pfn) {
 			cc->free_pfn = pageblock_start_pfn(end_pfn - 1);
+			// ?
 			cc->zone->compact_cached_free_pfn = cc->free_pfn;
 		}
+		// migrate_pfh이 start_pfn보다 작거나 end_pfn보다 크거나 같으면
+		// -> migrate_pfn이 존의 범위를 벗어나면
+		// migrate_pfn을 start_pfn 존의 시작 페이지 블럭으로 위치시킴
 		if (cc->migrate_pfn < start_pfn || cc->migrate_pfn >= end_pfn) {
 			cc->migrate_pfn = start_pfn;
+			// migrate pfn 위치를 기억하는 캐시는  2개를 사용?
 			cc->zone->compact_cached_migrate_pfn[0] = cc->migrate_pfn;
 			cc->zone->compact_cached_migrate_pfn[1] = cc->migrate_pfn;
 		}
 
+		// ?
 		if (cc->migrate_pfn <= cc->zone->compact_init_migrate_pfn)
 			cc->whole_zone = true;
 	}
 
+	// 마지막 migrated pfn을 0으로 리셋
 	last_migrated_pfn = 0;
 
 	/*
@@ -2143,16 +2171,21 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * Until a pageblock with isolation candidates is found, keep the
 	 * cached PFNs in sync to avoid revisiting the same blocks.
 	 */
+	// ?
 	update_cached = !sync &&
 		cc->zone->compact_cached_migrate_pfn[0] == cc->zone->compact_cached_migrate_pfn[1];
 
+	// ?
 	trace_mm_compaction_begin(start_pfn, cc->migrate_pfn,
 				cc->free_pfn, end_pfn, sync);
 
+	// ?
 	migrate_prep_local();
 
+	// compaction 수행 결과가 COMPACT_CONTINUE인 경우 수행
 	while ((ret = compact_finished(cc)) == COMPACT_CONTINUE) {
 		int err;
+		// start_pfn을 migrate_pfn으로 함
 		unsigned long start_pfn = cc->migrate_pfn;
 
 		/*
@@ -2164,18 +2197,27 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 		 * will proceed as normal.
 		 */
 		cc->rescan = false;
+
+		// start_pfn이 last_migrated_pfn 과 같아지면 rescan은 true가 됨
 		if (pageblock_start_pfn(last_migrated_pfn) ==
 		    pageblock_start_pfn(start_pfn)) {
 			cc->rescan = true;
 		}
 
+		// 페이지를 isolation 함
 		switch (isolate_migratepages(cc)) {
+		// 페이지 isolation 결과가 ISOLATE_ABORT 이면 compaction 결과는
+		// COMPACT_CONTENDED이고 migration 페이지를 원위치 시키고,
+		// migrate페이지 수를 0으로 클리어한 후 out으로 이동
 		case ISOLATE_ABORT:
 			ret = COMPACT_CONTENDED;
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
 			last_migrated_pfn = 0;
 			goto out;
+		// 페이지 isolation 결과가ISOLATE_NONE 이면
+		// -> 아무 페이도지도 isolation이안됨 
+		// update_cached 조건이면 
 		case ISOLATE_NONE:
 			if (update_cached) {
 				cc->zone->compact_cached_migrate_pfn[1] =
@@ -2188,27 +2230,35 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			 * previous cc->order aligned block.
 			 */
 			goto check_drain;
+		// 페이지 isolation 결과가 ISOLATE_SUCCESS이면 update_cached 는 false
+		// last_migrated_pfn 을 start_pfn으로 함
 		case ISOLATE_SUCCESS:
 			update_cached = false;
 			last_migrated_pfn = start_pfn;
 			;
 		}
 
+		// migration 포인터가 가르키는 페이지를 free 페이지로 이동시킴
+		// function 분석 해야 하나?
 		err = migrate_pages(&cc->migratepages, compaction_alloc,
 				compaction_free, (unsigned long)cc, cc->mode,
 				MR_COMPACTION);
 
+		// ?
 		trace_mm_compaction_migratepages(cc->nr_migratepages, err,
 							&cc->migratepages);
 
 		/* All pages were either migrated or will be released */
 		cc->nr_migratepages = 0;
+		// 모든 page가 migration 됐거나 relaese 된 경우
 		if (err) {
+			// migration하려던 페이지를 원래 위치로 이동시킴?
 			putback_movable_pages(&cc->migratepages);
 			/*
 			 * migrate_pages() may return -ENOMEM when scanners meet
 			 * and we want compact_finished() to detect it
 			 */
+			// 스캐닝이 완료되지 않은 상태이면 COMPACT_CONTENED를 반환 함
 			if (err == -ENOMEM && !compact_scanners_met(cc)) {
 				ret = COMPACT_CONTENDED;
 				goto out;
@@ -2217,6 +2267,8 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			 * We failed to migrate at least one page in the current
 			 * order-aligned block, so skip the rest of it.
 			 */
+			// direct_compaction을 요청하였고 MIGRATE_ASYNC 플래그를
+			// 사용한 경우라면 지금 처리 중인 migrate블럭을 skip 함
 			if (cc->direct_compaction &&
 						(cc->mode == MIGRATE_ASYNC)) {
 				cc->migrate_pfn = block_end_pfn(
@@ -2234,12 +2286,17 @@ check_drain:
 		 * compact_finished() can detect immediately if allocation
 		 * would succeed.
 		 */
+		/* lru 캐시인 pagevec들을 drain할지 결정*/
+		// @order가 0보다 크고 last_migrated_pfn이면 수행
 		if (cc->order > 0 && last_migrated_pfn) {
 			int cpu;
+			// 진행 중인 block의 start를 구함
 			unsigned long current_block_start =
 				block_start_pfn(cc->migrate_pfn, cc->order);
 
+			// last_migrated_pfn이 진행중인 block보다 작으면
 			if (last_migrated_pfn < current_block_start) {
+				// cpu의 pagevecs로부터 page를 drain 함
 				cpu = get_cpu();
 				lru_add_drain_cpu(cpu);
 				drain_local_pages(cc->zone);
@@ -2250,6 +2307,7 @@ check_drain:
 		}
 
 		/* Stop if a page has been captured */
+		// ?
 		if (capc && capc->page) {
 			ret = COMPACT_SUCCESS;
 			break;
@@ -2276,6 +2334,7 @@ out:
 			cc->zone->compact_cached_free_pfn = free_pfn;
 	}
 
+	// COMPACTMIGRATE_SCANNED과 COMPACTFREE_SCANNED의 카운터를 갱신
 	count_compact_events(COMPACTMIGRATE_SCANNED, cc->total_migrate_scanned);
 	count_compact_events(COMPACTFREE_SCANNED, cc->total_free_scanned);
 
@@ -2285,12 +2344,16 @@ out:
 	return ret;
 }
 
+/* compaction 을수행하기 위한 구조체를 구성, compation을 요청하고 결과를 리턴함
+ * comment by grlee
+ */
 static enum compact_result compact_zone_order(struct zone *zone, int order,
 		gfp_t gfp_mask, enum compact_priority prio,
 		unsigned int alloc_flags, int classzone_idx,
 		struct page **capture)
 {
 	enum compact_result ret;
+	// compaction을 수행하기 위해 구조체를 준비함
 	struct compact_control cc = {
 		.order = order,
 		.search_order = order,
@@ -2310,9 +2373,11 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 		.page = NULL,
 	};
 
+	// @capture이면 capture_control을 capc로 함?
 	if (capture)
 		current->capture_control = &capc;
 
+	// 구조체를 이용 compaction을 수행
 	ret = compact_zone(&cc, &capc);
 
 	VM_BUG_ON(!list_empty(&cc.freepages));
@@ -2321,6 +2386,7 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 	*capture = capc.page;
 	current->capture_control = NULL;
 
+	// compation결과를 return 함
 	return ret;
 }
 
@@ -2336,6 +2402,11 @@ int sysctl_extfrag_threshold = 500;
  *
  * This is the main entry point for direct page compaction.
  */
+ /* 
+  * compaction을 요청하여 진행상태를 리턴함
+  * 진행상태에 따라 compaction defer를 리셋하거나 업데이트 함
+  * comment by grlee
+  */
 enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
 		enum compact_priority prio, struct page **capture)
@@ -2349,27 +2420,35 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	 * Check if the GFP flags allow compaction - GFP_NOIO is really
 	 * tricky context because the migration might require IO
 	 */
+	// may_perform_io가 아니면 COMPACT_SKIPPED를 반환함?
 	if (!may_perform_io)
 		return COMPACT_SKIPPED;
 
 	trace_mm_compaction_try_to_compact_pages(order, gfp_mask, prio);
 
 	/* Compact each zone in the list */
+	/* 요청한 order를 위한 compaction을 시도하고,
+	 * 진행 상태에 따라 compaction을 끝내거나 재시도 함*/
+	// @ac->zonelist, @ac->high_zoneidx, @ac->nodemask를 이용 compaction 수행
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist, ac->high_zoneidx,
 								ac->nodemask) {
 		enum compact_result status;
 
+		// @prio가 MIN_COMPACT_PRIORITY 보다 크고
+		// compaction이 미뤄진 상태이면 function 처음으로 이동
 		if (prio > MIN_COMPACT_PRIORITY
 					&& compaction_deferred(zone, order)) {
 			rc = max_t(enum compact_result, COMPACT_DEFERRED, rc);
 			continue;
 		}
 
+		// compaction을 시도하고 진행 상태를 리턴함
 		status = compact_zone_order(zone, order, gfp_mask, prio,
 				alloc_flags, ac_classzone_idx(ac), capture);
 		rc = max(status, rc);
 
 		/* The allocation should succeed, stop compacting */
+		// compaction 상태가 COMPACT_SUCCESS 이면 compaction을 종료
 		if (status == COMPACT_SUCCESS) {
 			/*
 			 * We think the allocation will succeed in this zone,
@@ -2377,11 +2456,14 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 			 * will repeat this with true if allocation indeed
 			 * succeeds in this zone.
 			 */
+			// compaction defer를 리셋하고 결과 반환
 			compaction_defer_reset(zone, order, false);
 
 			break;
 		}
 
+		// @prio가 COMPACT_PRIO_ASYNC 가 아니고
+		// status가 COMPACT_COMPLETE 나 COMPACT_PARTIAL_SKIPPED인 경우
 		if (prio != COMPACT_PRIO_ASYNC && (status == COMPACT_COMPLETE ||
 					status == COMPACT_PARTIAL_SKIPPED))
 			/*
@@ -2389,6 +2471,7 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 			 * so we defer compaction there. If it ends up
 			 * succeeding after all, it will be reset.
 			 */
+			// compaction 유예표시를 함
 			defer_compaction(zone, order);
 
 		/*
@@ -2396,6 +2479,9 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 		 * async compaction, or due to a fatal signal detected. In that
 		 * case do not try further zones
 		 */
+		// 다음과 같은 조건일 때 결과를 반환 함
+		// 1. 비동기로 compacion 수행 중 need_resched()
+		// 2. fetal signal이 감지 됨
 		if ((prio == COMPACT_PRIO_ASYNC && need_resched())
 					|| fatal_signal_pending(current))
 			break;

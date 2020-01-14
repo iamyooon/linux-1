@@ -2558,12 +2558,12 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 		if (can_steal_fallback(order, migratetype))
 			*can_steal = true;
 
-		// @only_stealable이 false라면 할당가능한 페이지가 존재하는 fallback migrattype을 리턴함.
+		// @only_stealable이 false라면 할당가능한 페이지가 존재하는 fallback migrattype을 반환함.
 		// stealable하지 않다고 됨.
 		if (!only_stealable)
 			return fallback_mt;
 
-		// @할당가능하고 stealable한 페이지가 존재한다면 해당 fallback migrattype을 리턴함.
+		// @할당가능하고 stealable한 페이지가 존재한다면 해당 fallback migrattype을 반환함.
 		if (*can_steal)
 			return fallback_mt;
 	}
@@ -3400,7 +3400,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 	// page에 문제가 있는지 확인
 	} while (check_new_pcp(page));
 
-	// page를 반환 함
+	// page를 반환함
 	return page;
 }
 
@@ -4144,6 +4144,21 @@ out:
 
 #ifdef CONFIG_COMPACTION
 /* Try memory compaction for high-order allocations before reclaim */
+/*
+ * 1. compaction
+ *   free 페이지가 파현화돼있어 페이지 할당에 실패한 경우
+ *   movable 페이지를 다른 곳으로 migration하여 free 페이지를 확보하는 방법
+ *   여기서movable 페이지는 사용자 역역에서 할당한 메모리나 파일에 해당함
+ * 2. compaction 동작 모드
+ *   1) direct-compaction : 페이지 할당에서 직접 수행
+ *   2) manual-compaction : 메뉴얼하게 요청
+ *   3) kcompactd : 메모리 부족시 자동으로 wake되어 백그라운드에서 수행
+*/
+/* direct-compaction을 요청한 후 성공하면 페이지 할당 시도함
+ * @order가 0이면 compaction으로 해결 불가능하므로 NULL을 반환
+ * @order가 0이 아니면 direct-compaction을 수행하고 페이지 할당을 시도함
+ * - comment by grlee
+ */
 static struct page *
 __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
@@ -4153,15 +4168,19 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	unsigned long pflags;
 	unsigned int noreclaim_flag;
 
+	// order가 0이 아니면 NULL 반환
 	if (!order)
 		return NULL;
 
+	// ?
 	psi_memstall_enter(&pflags);
 	noreclaim_flag = memalloc_noreclaim_save();
 
+	// high-order 할당을 위한 direct-compaction을 수행
 	*compact_result = try_to_compact_pages(gfp_mask, order, alloc_flags, ac,
 								prio, &page);
 
+	// ?
 	memalloc_noreclaim_restore(noreclaim_flag);
 	psi_memstall_leave(&pflags);
 
@@ -4172,13 +4191,19 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	count_vm_event(COMPACTSTALL);
 
 	/* Prep a captured page if available */
+	// ?
 	if (page)
 		prep_new_page(page, order, gfp_mask, alloc_flags);
 
 	/* Try get a page from the freelist if available */
+	// 페이지 할당을 시도함
 	if (!page)
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
+	// 페이지 할당에 성공 후 다음과 같이 수행 후 페이지를 반환함
+	// - zone->compact_blockskip_flush를 false로 함
+	// - compaction 진행 카운터들 리셋 
+	// - COMPACTSUCCESS 카운터 증가
 	if (page) {
 		struct zone *zone = page_zone(page);
 
@@ -4192,6 +4217,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	 * It's bad if compaction run occurs and fails. The most likely reason
 	 * is that pages exist, but not enough to satisfy watermarks.
 	 */
+	// 페이지 할당에 실패한 경우 COMPACTFAIL 카운터를 증가시키고 0을 반환함
 	count_vm_event(COMPACTFAIL);
 
 	cond_resched();
@@ -4366,6 +4392,10 @@ EXPORT_SYMBOL_GPL(fs_reclaim_release);
 #endif
 
 /* Perform direct synchronous page reclaim */
+/* 
+ * 페이지 회수 요청
+ * comment by grlee
+ */
 static int
 __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 					const struct alloc_context *ac)
@@ -4378,15 +4408,18 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 
 	/* We now go into synchronous reclaim */
 	cpuset_memory_pressure_bump();
+	// 메모리 압박이 시작되었음을 psi에 알린다?
 	psi_memstall_enter(&pflags);
 	fs_reclaim_acquire(gfp_mask);
 	noreclaim_flag = memalloc_noreclaim_save();
 
+	// 페이지 회수를 시도하고 회수한 페이지수를 리턴 받음
 	progress = try_to_free_pages(ac->zonelist, order, gfp_mask,
 								ac->nodemask);
 
 	memalloc_noreclaim_restore(noreclaim_flag);
 	fs_reclaim_release(gfp_mask);
+	// 메모리 압박이 끝났음을 알림 ?
 	psi_memstall_leave(&pflags);
 
 	cond_resched();
@@ -4395,6 +4428,11 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 }
 
 /* The really slow allocator path where we enter direct reclaim */
+/* 
+ * 페이지 회수 시도 후에 페이지 할당을 시도한다.
+ * 처음 페이지 할당에 실패한 경우 pcp 캐시를 비워 재시도 한다.
+ * comment by grlee
+ */
 static inline struct page *
 __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
@@ -4403,11 +4441,13 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	struct page *page = NULL;
 	bool drained = false;
 
+	// 페이지 회수를 시도
 	*did_some_progress = __perform_reclaim(gfp_mask, order, ac);
 	if (unlikely(!(*did_some_progress)))
 		return NULL;
 
 retry:
+	// @order 페이지 할당 시도
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
 	/*
@@ -4415,6 +4455,8 @@ retry:
 	 * pages are pinned on the per-cpu lists or in high alloc reserves.
 	 * Shrink them them and try again
 	 */
+	// 페이지 할당에 처음으로 실패한 경우 hiatomic 페이지 블럭을 해제하고,
+	// pcp 캐시를 비워retry로 이동하여 페이지 할당을 재시도 함
 	if (!page && !drained) {
 		unreserve_highatomic_pageblock(ac, false);
 		drain_all_pages(NULL);
@@ -4657,12 +4699,18 @@ check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 
 	return false;
 }
-
+/*
+ *
+ *
+ */
+/*comment by grlee*/
 static inline struct page *
 __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 						struct alloc_context *ac)
 {
+	// direct-reclaim이가능한지 확인
 	bool can_direct_reclaim = gfp_mask & __GFP_DIRECT_RECLAIM;
+	// order가 3이상이면 costly order(PAGE_ALLOC_COSTLY_ORDER 3)
 	const bool costly_order = order > PAGE_ALLOC_COSTLY_ORDER;
 	struct page *page = NULL;
 	unsigned int alloc_flags;
@@ -4678,11 +4726,14 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	 * We also sanity check to catch abuse of atomic reserves being used by
 	 * callers that are not in atomic context.
 	 */
+	// 불합리하게 __GFP_ATOMIC 과 __GFP_DIRECT_RECLAIM이 동시에 요청한 경우
+	// __GFP_ATOMIC 요청을 제거
 	if (WARN_ON_ONCE((gfp_mask & (__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)) ==
 				(__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)))
 		gfp_mask &= ~__GFP_ATOMIC;
 
 retry_cpuset:
+	// 디폴트 compact 우선 순위로 준비
 	compaction_retries = 0;
 	no_progress_loops = 0;
 	compact_priority = DEF_COMPACT_PRIORITY;
@@ -4693,6 +4744,10 @@ retry_cpuset:
 	 * kswapd needs to be woken up, and to avoid the cost of setting up
 	 * alloc_flags precisely. So we do that now.
 	 */
+	// gfp_mask에 따라 alloc_flags를 설정(할당플래그를 구함)
+	// 추가 설정될 수있는 할당 플래그
+	// ALLOC_WMARK_MIN, ALLOC_NO_WATERMARKS, ALLOC_CPUSET, ALLOC_HIGH, ALLOC_HARDER,
+	// ALLOC_CMA
 	alloc_flags = gfp_to_alloc_flags(gfp_mask);
 
 	/*
@@ -4701,11 +4756,14 @@ retry_cpuset:
 	 * there was a cpuset modification and we are retrying - otherwise we
 	 * could end up iterating over non-eligible zones endlessly.
 	 */
+	// 첫 존을 선택
 	ac->preferred_zoneref = first_zones_zonelist(ac->zonelist,
 					ac->high_zoneidx, ac->nodemask);
+	// 사용가능한 존이 업는 경우 nopage롤 이동
 	if (!ac->preferred_zoneref->zone)
 		goto nopage;
 
+	// ALLOC_KSWAPD 플래그를 사용하는 경우에는 kswapd를 깨움
 	if (alloc_flags & ALLOC_KSWAPD)
 		wake_all_kswapds(order, gfp_mask, ac);
 
@@ -4713,6 +4771,7 @@ retry_cpuset:
 	 * The adjusted alloc_flags might result in immediate success, so try
 	 * that first
 	 */
+	// 페이지 할당 시도함
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 	if (page)
 		goto got_pg;
@@ -4726,6 +4785,11 @@ retry_cpuset:
 	 * Don't try this for allocations that are allowed to ignore
 	 * watermarks, as the ALLOC_NO_WATERMARKS attempt didn't yet happen.
 	 */
+	/* zone을 순환하여 compaction을 수행하고 페이지 확보를 시도함*/
+	// 아래 조건을 만족하는 경우 direct compaction을 시도하고 페이지를 할당
+	// - direct reclaim 이 가능
+	// - costly order 요청이거나 MOVABLE이 아닌 1 order 이상의 요청
+	// - pfmemalloc을 사용하지 않는 일반 할당 요청?
 	if (can_direct_reclaim &&
 			(costly_order ||
 			   (order > 0 && ac->migratetype != MIGRATE_MOVABLE))
