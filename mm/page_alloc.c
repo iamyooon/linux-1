@@ -4151,7 +4151,7 @@ out:
  *   여기서movable 페이지는 사용자 역역에서 할당한 메모리나 파일에 해당함
  * 2. compaction 동작 모드
  *   1) direct-compaction : 페이지 할당에서 직접 수행
- *   2) manual-compaction : 메뉴얼하게 요청
+ *   2) manual-compaction : 커널 인터페이스를 통한 요청
  *   3) kcompactd : 메모리 부족시 자동으로 wake되어 백그라운드에서 수행
 */
 /* direct-compaction을 요청한 후 성공하면 페이지 할당 시도함
@@ -4169,6 +4169,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	unsigned int noreclaim_flag;
 
 	// order가 0이 아니면 NULL 반환
+	// -> order == 0 이면
 	if (!order)
 		return NULL;
 
@@ -4771,6 +4772,7 @@ retry_cpuset:
 	 * The adjusted alloc_flags might result in immediate success, so try
 	 * that first
 	 */
+	// 할당 가능성을 증가시키기 위해 인자를 조정한 후 
 	// 페이지 할당 시도함
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 	if (page)
@@ -4786,14 +4788,15 @@ retry_cpuset:
 	 * watermarks, as the ALLOC_NO_WATERMARKS attempt didn't yet happen.
 	 */
 	/* zone을 순환하여 compaction을 수행하고 페이지 확보를 시도함*/
-	// 아래 조건을 만족하는 경우 direct compaction을 시도하고 페이지를 할당
+	// 아래 조건을 모두 만족하는 경우 direct compaction을 시도하고 페이지를 할당
 	// - direct reclaim 이 가능
-	// - costly order 요청이거나 MOVABLE이 아닌 1 order 이상의 요청
+	// - costly order 요청(order > 3)이거나 MOVABLE이 아닌 1 order 이상의 할당요청
+	//   -> 특정 기준 이상의 큰페이지일 경우에만 컴팩션을 수행하라는 의도로 보임. 
+	//   -> 아마도 비용이 커서 그런게 아닐까??
 	// - pfmemalloc을 사용하지 않는 일반 할당 요청?
+	// TBD. compaction 코드인데 왜 direct reclaim flag를 검사할까??
 	if (can_direct_reclaim &&
-			(costly_order ||
-			   (order > 0 && ac->migratetype != MIGRATE_MOVABLE))
-			&& !gfp_pfmemalloc_allowed(gfp_mask)) {
+			(costly_order || (order > 0 && ac->migratetype != MIGRATE_MOVABLE)) && !gfp_pfmemalloc_allowed(gfp_mask)) {
 		page = __alloc_pages_direct_compact(gfp_mask, order,
 						alloc_flags, ac,
 						INIT_COMPACT_PRIORITY,
@@ -5078,6 +5081,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp_mask);
 
 	/* First allocation attempt */
+	// 전달된 인자를 기반으로 시도가능한 모든 존에서 fastpath allocation을 수행함.
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
 	if (likely(page))
 		goto out;

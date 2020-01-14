@@ -778,6 +778,16 @@ static bool too_many_isolated(pg_data_t *pgdat)
  * and cc->nr_migratepages is updated accordingly. The cc->migrate_pfn field
  * is neither read nor updated.
  */
+// ->  @cc를 참고하여 @low_pfn ~ @end_pfn 까지의 페이지 범위안에서 isolate 가능한 페이지를
+// 찾아 isolate하고 isolated page는 @cc의 migratepages 리스트에 연결함.
+//
+// 1) isolate 가능여부를 체크한 페이지갯수
+// 여기까지 왔으면 isolate 대상은 lru page 뿐???
+// isolate 전에 lru list에서 page를 제거함.
+// isolate 가능한 페이지이므로 @cc의 migratepages 리스트에 추가함
+// 함수가 리턴하면 migratepages에 매달린 페이지는 compaction을 위해 이동함
+// isolate된 페이지 갯수를 증가시킴
+// check한 페이지 개수를 갱신한 추가함
 static unsigned long
 isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			unsigned long end_pfn, isolate_mode_t isolate_mode)
@@ -816,6 +826,8 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		next_skip_pfn = block_end_pfn(low_pfn, cc->order);
 	}
 
+	// ->  @low_pfn ~ @end_pfn 까지의 페이지 범위안에서 isolate 가능한 페이지를
+	// 찾아 @cc의 migratepages 리스트에 연결함.
 	/* Time to isolate some pages for migration */
 	for (; low_pfn < end_pfn; low_pfn++) {
 
@@ -855,8 +867,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 
 		if (!pfn_valid_within(low_pfn))
 			goto isolate_fail;
+		// isolate 가능여부를 체크한 페이지갯수
 		nr_scanned++;
 
+		// @low_pfn과 연관된 페이지 구조체를 구함
 		page = pfn_to_page(low_pfn);
 
 		/*
@@ -977,6 +991,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 
 		lruvec = mem_cgroup_page_lruvec(page, pgdat);
 
+		// 여기까지 왔으면 isolate 대상은 lru page 뿐???
 		/* Try isolate the page */
 		if (__isolate_lru_page(page, isolate_mode) != 0)
 			goto isolate_fail;
@@ -984,13 +999,17 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		VM_BUG_ON_PAGE(PageCompound(page), page);
 
 		/* Successfully isolated */
+		// isolate 전에 lru list에서 page를 제거함.
 		del_page_from_lru_list(page, lruvec, page_lru(page));
 		inc_node_page_state(page,
 				NR_ISOLATED_ANON + page_is_file_cache(page));
 
 isolate_success:
+		// isolate 가능한 페이지이므로 @cc의 migratepages 리스트에 추가함
+		// 함수가 리턴하면 migratepages에 매달린 페이지는 compaction을 위해 이동함
 		list_add(&page->lru, &cc->migratepages);
 		cc->nr_migratepages++;
+		// isolate된 페이지 갯수를 증가시킴
 		nr_isolated++;
 
 		/*
@@ -1006,6 +1025,7 @@ isolate_success:
 		}
 
 		continue;
+// isolate 불가한 페이지가 나오면 오는 곳??
 isolate_fail:
 		if (!skip_on_failure)
 			continue;
@@ -1064,6 +1084,7 @@ isolate_abort:
 						nr_scanned, nr_isolated);
 
 fatal_pending:
+	// check한 페이지 개수를 갱신한 추가함
 	cc->total_migrate_scanned += nr_scanned;
 	if (nr_isolated)
 		count_compact_events(COMPACTISOLATED, nr_isolated);
@@ -1738,6 +1759,9 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
  * starting at the block pointed to by the migrate scanner pfn within
  * compact_control.
  */
+// -> @cc를 참고해서 특정 범위에 속한 하나 이상의 페이지블럭들을 대상으로 
+// 페이지를 isolate하고 @cc의 migratepages 리스트에 연결함.
+// migrate 된 페이지의 갯수를 리턴함.
 static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 {
 	unsigned long block_start_pfn;
@@ -1755,6 +1779,7 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	 * the lowest PFN as the starting point for linear scanning.
 	 */
 	low_pfn = fast_find_migrateblock(cc);
+	// low_pfn과 연관된 페이지가 속한 페이지블럭의 start pfn
 	block_start_pfn = pageblock_start_pfn(low_pfn);
 	if (block_start_pfn < cc->zone->zone_start_pfn)
 		block_start_pfn = cc->zone->zone_start_pfn;
@@ -1767,17 +1792,17 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	fast_find_block = low_pfn != cc->migrate_pfn && !cc->fast_search_fail;
 
 	/* Only scan within a pageblock boundary */
+	// low_pfn과 연관된 페이지가 속한 페이지블럭의 end pfn
 	block_end_pfn = pageblock_end_pfn(low_pfn);
 
 	/*
 	 * Iterate over whole pageblocks until we find the first suitable.
 	 * Do not cross the free scanner.
 	 */
+	// -> 특정 범위에 속한 하나 이상의 페이지블럭들을 대상으로 
+	// 페이지를 isolate하고 @cc의 migratepages 리스트에 연결함.
 	for (; block_end_pfn <= cc->free_pfn;
-			fast_find_block = false,
-			low_pfn = block_end_pfn,
-			block_start_pfn = block_end_pfn,
-			block_end_pfn += pageblock_nr_pages) {
+			fast_find_block = false, low_pfn = block_end_pfn, block_start_pfn = block_end_pfn, block_end_pfn += pageblock_nr_pages) {
 
 		/*
 		 * This can potentially iterate a massively long zone with
@@ -1817,6 +1842,8 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 		}
 
 		/* Perform the isolation */
+		// -> @cc를 참고하여 low_pfn ~ block_end_pfn 주소범위에서 ioslatable page를 찾음
+		//    해당 page를 isolate하고 @cc의 migratepages 리스트에 연결함.
 		low_pfn = isolate_migratepages_block(cc, low_pfn,
 						block_end_pfn, isolate_mode);
 
@@ -1834,6 +1861,7 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	/* Record where migration scanner will be restarted. */
 	cc->migrate_pfn = low_pfn;
 
+	// @cc의 migratepages 리스트에 연결된 페이지 갯수
 	return cc->nr_migratepages ? ISOLATE_SUCCESS : ISOLATE_NONE;
 }
 
@@ -2073,6 +2101,13 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
  * compaction을 계속 수행해야하는지도 확인
  * comment by grlee
  */
+// @cc를 참고해서 특정 범위에 속한 하나 이상의 페이지블럭들을 대상으로 페이지는 isolate한다.
+// @cc의 migratepages 리스트에 연결하고 nr_migratepages를 증가시킴.
+// @cc의 migratepages에 연결된 페이지를 어딘가로 옮기고 해당 페이지는 free한다. 
+// @cc의 freepages 리스트에 연결하고 nr_freepages를 증가시킴.
+// order가 0보다 크고 last_migrated_pfn이면 free page를 @zone에서 추가로 확보한다.
+// free한 page가 존재한다면 nr_freepages, zone->compact_cached_free_pfn을 갱신한다.
+// COMPACTMIGRATE_SCANNED과 COMPACTFREE_SCANNED의 카운터를 갱신한다.
 static enum compact_result
 compact_zone(struct compact_control *cc, struct capture_control *capc)
 {
@@ -2182,6 +2217,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	// ?
 	migrate_prep_local();
 
+	// -> cc를 셋업한 후에.............
 	// compaction 수행 결과가 COMPACT_CONTINUE인 경우 수행
 	while ((ret = compact_finished(cc)) == COMPACT_CONTINUE) {
 		int err;
@@ -2205,6 +2241,9 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 		}
 
 		// 페이지를 isolation 함
+		// -> @cc를 참고해서 특정 범위에 속한 하나 이상의 페이지블럭들을 대상으로 
+		// 페이지를 isolate하고(lru list에서 제거) @cc의 migratepages 리스트에 연결함.
+		// migrate 된 페이지의 갯수를 리턴함.
 		switch (isolate_migratepages(cc)) {
 		// 페이지 isolation 결과가 ISOLATE_ABORT 이면 compaction 결과는
 		// COMPACT_CONTENDED이고 migration 페이지를 원위치 시키고,
@@ -2231,6 +2270,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			 */
 			goto check_drain;
 		// 페이지 isolation 결과가 ISOLATE_SUCCESS이면 update_cached 는 false
+		// -> page isolation에 성공한 페이지가 1개 이상이라면
 		// last_migrated_pfn 을 start_pfn으로 함
 		case ISOLATE_SUCCESS:
 			update_cached = false;
@@ -2240,6 +2280,9 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 
 		// migration 포인터가 가르키는 페이지를 free 페이지로 이동시킴
 		// function 분석 해야 하나?
+		// -> @cc의 migratepages에 연결된 페이지를 어딘가로 옮기고 
+		// 해당 페이지는 free한다. free한 페이지는 @cc의 freepages에 연결하고
+		// nr_freepages를 증가시킴.
 		err = migrate_pages(&cc->migratepages, compaction_alloc,
 				compaction_free, (unsigned long)cc, cc->mode,
 				MR_COMPACTION);
@@ -2251,6 +2294,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 		/* All pages were either migrated or will be released */
 		cc->nr_migratepages = 0;
 		// 모든 page가 migration 됐거나 relaese 된 경우
+		// -> migration에 실패한 페이지가 1개라도 있다면
 		if (err) {
 			// migration하려던 페이지를 원래 위치로 이동시킴?
 			putback_movable_pages(&cc->migratepages);
@@ -2278,6 +2322,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			}
 		}
 
+// isolation, migration이 끝난 후...
 check_drain:
 		/*
 		 * Has the migration scanner moved away from the previous
@@ -2288,6 +2333,7 @@ check_drain:
 		 */
 		/* lru 캐시인 pagevec들을 drain할지 결정*/
 		// @order가 0보다 크고 last_migrated_pfn이면 수행
+		// -> free page를 @zone에서 추가로 확보??
 		if (cc->order > 0 && last_migrated_pfn) {
 			int cpu;
 			// 진행 중인 block의 start를 구함
@@ -2319,6 +2365,8 @@ out:
 	 * Release free pages and update where the free scanner should restart,
 	 * so we don't leave any returned pages behind in the next attempt.
 	 */
+	// free한 page가 존재한다면
+	// nr_freepages, zone->compact_cached_free_pfn을 갱신함.
 	if (cc->nr_freepages > 0) {
 		unsigned long free_pfn = release_freepages(&cc->freepages);
 
@@ -2346,6 +2394,7 @@ out:
 
 /* compaction 을수행하기 위한 구조체를 구성, compation을 요청하고 결과를 리턴함
  * comment by grlee
+ * -> 특정 존을 대상으로 compaction을 수행함.
  */
 static enum compact_result compact_zone_order(struct zone *zone, int order,
 		gfp_t gfp_mask, enum compact_priority prio,
@@ -2378,6 +2427,13 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 		current->capture_control = &capc;
 
 	// 구조체를 이용 compaction을 수행
+	// @cc를 참고해서 특정 범위에 속한 하나 이상의 페이지블럭들을 대상으로 페이지는 isolate한다.
+	// @cc의 migratepages 리스트에 연결하고 nr_migratepages를 증가시킴.
+	// @cc의 migratepages에 연결된 페이지를 어딘가로 옮기고 해당 페이지는 free한다. 
+	// @cc의 freepages 리스트에 연결하고 nr_freepages를 증가시킴.
+	// order가 0보다 크고 last_migrated_pfn이면 free page를 @zone에서 추가로 확보한다.
+	// free한 page가 존재한다면 nr_freepages, zone->compact_cached_free_pfn을 갱신한다.
+	// COMPACTMIGRATE_SCANNED과 COMPACTFREE_SCANNED의 카운터를 갱신한다.
 	ret = compact_zone(&cc, &capc);
 
 	VM_BUG_ON(!list_empty(&cc.freepages));
@@ -2399,6 +2455,7 @@ int sysctl_extfrag_threshold = 500;
  * @alloc_flags: The allocation flags of the current allocation
  * @ac: The context of current allocation
  * @prio: Determines how hard direct compaction should try to succeed
+ * TBD. capture 인자에 대한 설명을 contribution
  *
  * This is the main entry point for direct page compaction.
  */
